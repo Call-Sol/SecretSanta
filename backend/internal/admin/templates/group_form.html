@@ -1,0 +1,22 @@
+{{define "group_form"}}
+{{template "head" .}}
+{{template "nav" .}}
+<main class="container pb-5">
+  <div class="col-lg-6">
+    <h1 class="h3 mb-3">New group</h1>
+    {{template "alert" .}}
+    <form method="post" action="/groups" class="card shadow-sm">
+      <div class="card-body">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <div class="mb-3">
+          <label class="form-label" for="name">Name</label>
+          <input class="form-control" id="name" name="name" maxlength="80" required>
+        </div>
+        <button class="btn btn-dark" type="submit">Create group</button>
+        <a class="btn btn-link" href="/groups">Cancel</a>
+      </div>
+    </form>
+  </div>
+</main>
+{{template "foot" .}}
+{{end}}

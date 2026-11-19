@@ -186,6 +186,46 @@ not a pair
 	}
 }
 
+func TestLoadForAdmin(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/secretsanta")
+	t.Setenv("TELEGRAM_BOT_USERNAME", "@secret_santa_bot")
+	t.Setenv("ADMIN_USERNAME", "operator")
+	t.Setenv("ADMIN_PASSWORD", "test-password")
+	t.Setenv("ADMIN_COOKIE_SECURE", "")
+	t.Setenv("ADMIN_HTTP_ADDR", "")
+
+	cfg, err := LoadForAdmin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TelegramBotUsername != "secret_santa_bot" || cfg.AdminUsername != "operator" {
+		t.Fatalf("username %q admin %q", cfg.TelegramBotUsername, cfg.AdminUsername)
+	}
+	if cfg.AdminPassword != "test-password" {
+		t.Fatal("password was not kept")
+	}
+	if cfg.AdminHTTPAddr != ":8080" || cfg.AdminCookieSecure || cfg.TelegramBotToken != "" {
+		t.Fatalf("addr %q secure %v token %q", cfg.AdminHTTPAddr, cfg.AdminCookieSecure, cfg.TelegramBotToken)
+	}
+}
+
+func TestLoadForAdminRejectsShortPassword(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/secretsanta")
+	t.Setenv("TELEGRAM_BOT_USERNAME", "secret_santa_bot")
+	t.Setenv("ADMIN_USERNAME", "operator")
+	t.Setenv("ADMIN_PASSWORD", "secret1")
+
+	_, err := LoadForAdmin()
+	if err == nil || !strings.Contains(err.Error(), "ADMIN_PASSWORD") {
+		t.Fatalf("got %v", err)
+	}
+	if strings.Contains(err.Error(), "secret1") {
+		t.Fatalf("password leaked: %v", err)
+	}
+}
+
 func clearEnv(t *testing.T) {
 	t.Helper()
 	for _, key := range []string{

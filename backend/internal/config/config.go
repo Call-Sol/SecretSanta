@@ -32,6 +32,10 @@ type Config struct {
 	OutboxPollInterval    time.Duration
 	OutboxBatchSize       int
 	SessionTTL            time.Duration
+	AdminUsername         string
+	AdminPassword         string
+	AdminHTTPAddr         string
+	AdminCookieSecure     bool
 }
 
 // Load reads a full bot or worker configuration.
@@ -45,6 +49,60 @@ func Load() (Config, error) {
 func LoadForMigrate() (Config, error) {
 	loadDotEnv()
 	return load(false)
+}
+
+// LoadForAdmin reads the operator panel configuration.
+// The bot token is not required. The admin password is never logged.
+func LoadForAdmin() (Config, error) {
+	loadDotEnv()
+
+	databaseURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
+	if databaseURL == "" {
+		return Config{}, fmt.Errorf("DATABASE_URL is required")
+	}
+	username := strings.TrimPrefix(strings.TrimSpace(os.Getenv("TELEGRAM_BOT_USERNAME")), "@")
+	if username == "" {
+		return Config{}, fmt.Errorf("TELEGRAM_BOT_USERNAME is required")
+	}
+	if strings.ContainsAny(username, " /?#") {
+		return Config{}, fmt.Errorf("TELEGRAM_BOT_USERNAME is invalid")
+	}
+	adminUser := strings.TrimSpace(os.Getenv("ADMIN_USERNAME"))
+	if adminUser == "" {
+		return Config{}, fmt.Errorf("ADMIN_USERNAME is required")
+	}
+	if strings.ContainsAny(adminUser, " \t\r\n") || len(adminUser) > 64 {
+		return Config{}, fmt.Errorf("ADMIN_USERNAME is invalid")
+	}
+	adminPassword := os.Getenv("ADMIN_PASSWORD")
+	if strings.TrimSpace(adminPassword) == "" {
+		return Config{}, fmt.Errorf("ADMIN_PASSWORD is required")
+	}
+	if len(adminPassword) < 8 || len(adminPassword) > 200 {
+		return Config{}, fmt.Errorf("ADMIN_PASSWORD must be 8 to 200 characters")
+	}
+	level, err := parseLogLevel(getenv("LOG_LEVEL", "info"))
+	if err != nil {
+		return Config{}, err
+	}
+	ttl, err := parsePositiveDuration("SESSION_TTL", getenv("SESSION_TTL", "30m"))
+	if err != nil {
+		return Config{}, err
+	}
+	secure, err := parseBool("ADMIN_COOKIE_SECURE", getenv("ADMIN_COOKIE_SECURE", "false"))
+	if err != nil {
+		return Config{}, err
+	}
+	return Config{
+		DatabaseURL:         databaseURL,
+		TelegramBotUsername: username,
+		LogLevel:            level,
+		SessionTTL:          ttl,
+		AdminUsername:       adminUser,
+		AdminPassword:       adminPassword,
+		AdminHTTPAddr:       getenv("ADMIN_HTTP_ADDR", ":8080"),
+		AdminCookieSecure:   secure,
+	}, nil
 }
 
 func load(full bool) (Config, error) {
@@ -146,6 +204,17 @@ func parsePositiveInt(name, raw string) (int, error) {
 		return 0, fmt.Errorf("%s must be a positive integer", name)
 	}
 	return n, nil
+}
+
+func parseBool(name, raw string) (bool, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes":
+		return true, nil
+	case "0", "false", "no":
+		return false, nil
+	default:
+		return false, fmt.Errorf("%s must be true or false", name)
+	}
 }
 
 func getenv(key, fallback string) string {

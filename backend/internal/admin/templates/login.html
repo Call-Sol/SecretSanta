@@ -1,0 +1,25 @@
+{{define "login"}}
+{{template "head" .}}
+<main class="container min-vh-100 d-flex align-items-center py-5">
+  <div class="card shadow-sm mx-auto" style="width: 100%; max-width: 420px;">
+    <div class="card-body p-4">
+      <h1 class="h4 mb-1">Secret Santa</h1>
+      <p class="text-secondary mb-4">Operator sign-in</p>
+      {{template "alert" .}}
+      <form method="post" action="/login">
+        <input type="hidden" name="csrf" value="{{.CSRF}}">
+        <div class="mb-3">
+          <label class="form-label" for="username">Username</label>
+          <input class="form-control" id="username" name="username" autocomplete="username" required>
+        </div>
+        <div class="mb-3">
+          <label class="form-label" for="password">Password</label>
+          <input class="form-control" id="password" name="password" type="password" autocomplete="current-password" required>
+        </div>
+        <button class="btn btn-dark w-100" type="submit">Sign in</button>
+      </form>
+    </div>
+  </div>
+</main>
+{{template "foot" .}}
+{{end}}

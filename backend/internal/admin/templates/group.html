@@ -1,0 +1,130 @@
+{{define "group"}}
+{{template "head" .}}
+{{template "nav" .}}
+<main class="container pb-5">
+  <p class="mb-2"><a href="/groups">Groups</a></p>
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <h1 class="h3 mb-0">{{.Detail.Name}}</h1>
+    {{if eq .Detail.Status "ACTIVE"}}
+    <span class="badge text-bg-success">Active</span>
+    {{else}}
+    <span class="badge text-bg-secondary">Archived</span>
+    {{end}}
+  </div>
+  {{template "alert" .}}
+  {{if .Flash}}
+  <div class="alert alert-success" role="status">
+    <div class="fw-semibold mb-2">Deeplink, shown once</div>
+    <input class="form-control" readonly value="{{.Flash}}">
+    <div class="form-text">Copy it now. Opening this page again will not show the token.</div>
+  </div>
+  {{end}}
+
+  {{if eq .Detail.Status "ACTIVE"}}
+  <form method="post" action="/groups/{{.Detail.ID}}/invites" class="card shadow-sm mb-4">
+    <div class="card-body">
+      <h2 class="h5">New deeplink</h2>
+      <p class="text-secondary">The link joins this group in the bot. It is not a Telegram chat.</p>
+      <input type="hidden" name="csrf" value="{{.CSRF}}">
+      <div class="row g-3">
+        <div class="col-sm-4">
+          <label class="form-label" for="max_uses">Use limit</label>
+          <input class="form-control" id="max_uses" name="max_uses" inputmode="numeric" placeholder="Unlimited">
+        </div>
+        <div class="col-sm-4">
+          <label class="form-label" for="expires_on">Expiry date (UTC)</label>
+          <input class="form-control" id="expires_on" name="expires_on" type="date">
+        </div>
+        <div class="col-sm-4 d-flex align-items-end">
+          <button class="btn btn-dark" type="submit">Create deeplink</button>
+        </div>
+      </div>
+    </div>
+  </form>
+  {{end}}
+
+  <h2 class="h5">Deeplinks</h2>
+  {{if not .Detail.Invites}}
+  <p class="text-secondary">No deeplinks yet.</p>
+  {{else}}
+  <div class="card shadow-sm mb-4">
+    <div class="table-responsive">
+      <table class="table align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Created</th>
+            <th>Status</th>
+            <th>Uses</th>
+            <th>Expires</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Detail.Invites}}
+          <tr>
+            <td>{{formatTime .CreatedAt}}</td>
+            <td>
+              {{if eq .State "Active"}}<span class="badge text-bg-success">Active</span>
+              {{else if eq .State "Revoked"}}<span class="badge text-bg-secondary">Revoked</span>
+              {{else if eq .State "Expired"}}<span class="badge text-bg-warning">Expired</span>
+              {{else}}<span class="badge text-bg-dark">Used up</span>{{end}}
+            </td>
+            <td>{{.Usage}}</td>
+            <td>{{formatOptionalTime .ExpiresAt}}</td>
+            <td class="text-end">
+              {{if eq .State "Active"}}
+              <form method="post" action="/invites/{{.ID}}/revoke" class="d-inline">
+                <input type="hidden" name="csrf" value="{{$.CSRF}}">
+                <button class="btn btn-sm btn-outline-danger" type="submit">Revoke</button>
+              </form>
+              {{end}}
+            </td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {{end}}
+
+  <h2 class="h5">Members</h2>
+  {{if not .Detail.Members}}
+  <p class="text-secondary">No members yet. People appear here after they open a deeplink in Telegram.</p>
+  {{else}}
+  <div class="card shadow-sm mb-4">
+    <div class="table-responsive">
+      <table class="table align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Username</th>
+            <th>Role</th>
+            <th>Status</th>
+            <th>Joined</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Detail.Members}}
+          <tr>
+            <td>{{.DisplayName}}</td>
+            <td>{{if .Username}}@{{.Username}}{{else}}—{{end}}</td>
+            <td>{{.Role}}</td>
+            <td>{{.Status}}</td>
+            <td>{{formatTime .JoinedAt}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {{end}}
+
+  {{if eq .Detail.Status "ACTIVE"}}
+  <form method="post" action="/groups/{{.Detail.ID}}/archive">
+    <input type="hidden" name="csrf" value="{{.CSRF}}">
+    <button class="btn btn-outline-secondary" type="submit">Archive group</button>
+  </form>
+  {{end}}
+</main>
+{{template "foot" .}}
+{{end}}

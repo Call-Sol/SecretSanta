@@ -1,0 +1,47 @@
+{{define "groups"}}
+{{template "head" .}}
+{{template "nav" .}}
+<main class="container pb-5">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">Groups</h1>
+    <a class="btn btn-dark" href="/groups/new">New group</a>
+  </div>
+  {{if not .Groups}}
+  <div class="card shadow-sm">
+    <div class="card-body text-secondary">No groups yet.</div>
+  </div>
+  {{else}}
+  <div class="card shadow-sm">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Status</th>
+            <th>Members</th>
+            <th>Active links</th>
+            <th>Created</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Groups}}
+          <tr>
+            <td>{{.Name}}</td>
+            <td>
+              {{if eq .Status "ACTIVE"}}<span class="badge text-bg-success">Active</span>{{else}}<span class="badge text-bg-secondary">Archived</span>{{end}}
+            </td>
+            <td>{{.MemberCount}}</td>
+            <td>{{.ActiveInvites}}</td>
+            <td>{{formatTime .CreatedAt}}</td>
+            <td class="text-end"><a class="btn btn-sm btn-outline-dark" href="/groups/{{.ID}}">Open</a></td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {{end}}
+</main>
+{{template "foot" .}}
+{{end}}
