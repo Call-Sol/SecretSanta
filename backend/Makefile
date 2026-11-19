@@ -1,12 +1,15 @@
 # Run these targets from the backend directory.
 
-COMPOSE = docker compose -p secret-santa -f deploy/docker-compose.yml
+COMPOSE = docker compose -p secret-santa --project-directory . -f deploy/docker-compose.yml
 LOCAL_DATABASE_URL = postgres://secretsanta:secretsanta@localhost:54329/secretsanta?sslmode=disable
 
-.PHONY: up down run-bot run-worker run-admin migrate sqlc test test-integration lint
+.PHONY: up down stack run-bot run-worker run-admin migrate sqlc test test-integration lint
 
 up:
 	$(COMPOSE) up -d --wait postgres
+
+stack:
+	$(COMPOSE) up -d --build --wait
 
 down:
 	$(COMPOSE) down

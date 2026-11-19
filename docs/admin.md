@@ -11,14 +11,20 @@ The panel is an operator tool. It creates internal groups, issues Telegram deepl
 
 One extra Go process, `cmd/admin`, talks to the same PostgreSQL database as the bot. Pages are Go `html/template` files with [Bootstrap 5.3.3](https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css) loaded from the CDN. There is no Node build and no frontend framework. The browser is not allowed to run scripts (`script-src 'none'`).
 
-Start it from `backend/`:
+From `backend/`, either run it on the host:
 
 ```bash
 make migrate
 make run-admin
 ```
 
-Default address: `http://127.0.0.1:8080`.
+or start Postgres, migrations, the panel, the bot, and the worker together:
+
+```bash
+make stack
+```
+
+`make stack` publishes the panel on `ADMIN_HTTP_PORT` (default `8080`) and points every container at `postgres:5432`. The host URL in `.env` is left for `make run-admin`. Default address: `http://127.0.0.1:8080`.
 
 ## 2. Sign-in
 

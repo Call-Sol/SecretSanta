@@ -37,5 +37,6 @@ func run(ctx context.Context) error {
 
 	log.Info("database ready")
 	log.Info("outbox delivery is not started in this slice")
+	<-ctx.Done()
 	return nil
 }

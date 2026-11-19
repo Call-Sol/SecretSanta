@@ -1,3 +1,31 @@
+name: secret-santa
+
+x-app: &app
+  image: secret-santa:local
+  build:
+    context: .
+    dockerfile: deploy/Dockerfile
+  environment: &app-env
+    # Hostname on the compose network. The host URL in .env stays for `make run-*`.
+    DATABASE_URL: postgres://secretsanta:secretsanta@postgres:5432/secretsanta?sslmode=disable
+    TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+    TELEGRAM_BOT_USERNAME: ${TELEGRAM_BOT_USERNAME:-}
+    TELEGRAM_MODE: ${TELEGRAM_MODE:-polling}
+    TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
+    HTTP_ADDR: ${HTTP_ADDR:-:8080}
+    LOG_LEVEL: ${LOG_LEVEL:-info}
+    OUTBOX_POLL_INTERVAL: ${OUTBOX_POLL_INTERVAL:-1s}
+    OUTBOX_BATCH_SIZE: ${OUTBOX_BATCH_SIZE:-20}
+    SESSION_TTL: ${SESSION_TTL:-30m}
+    ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+    ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    ADMIN_HTTP_ADDR: ":8080"
+    ADMIN_COOKIE_SECURE: ${ADMIN_COOKIE_SECURE:-false}
+  restart: unless-stopped
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+
 services:
   postgres:
     image: postgres:16
@@ -16,6 +44,35 @@ services:
       start_period: 3s
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  migrate:
+    <<: *app
+    command: ["migrate"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  admin:
+    <<: *app
+    command: ["admin"]
+    ports:
+      - "${ADMIN_HTTP_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/login"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 3s
+
+  bot:
+    <<: *app
+    command: ["bot"]
+
+  worker:
+    <<: *app
+    command: ["worker"]
 
 volumes:
   postgres_data:

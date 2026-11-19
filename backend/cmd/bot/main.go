@@ -42,5 +42,6 @@ func run(ctx context.Context) error {
 	}
 	log.Info("telegram getMe", "bot_id", me.ID, "username", me.Username)
 	log.Info("update loop is not started in this slice", "mode", cfg.TelegramMode)
+	<-ctx.Done()
 	return nil
 }
