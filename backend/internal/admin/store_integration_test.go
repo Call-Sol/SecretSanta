@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -30,10 +29,6 @@ func TestPostgresGroupsAndInvites(t *testing.T) {
 	t.Cleanup(pool.Close)
 	store := NewPostgres(pool)
 
-	rawSession, _, err := store.CreateSession(ctx, time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
 	group, err := store.CreateGroup(ctx, " Ops friends ")
 	if err != nil {
 		t.Fatal(err)
@@ -61,29 +56,24 @@ func TestPostgresGroupsAndInvites(t *testing.T) {
 
 	limit := 2
 	expires := time.Now().Add(48 * time.Hour).UTC()
-	if err := store.CreateInvite(ctx, rawSession, group.ID, InviteOptions{MaxUses: &limit, ExpiresAt: &expires}, "secret_santa_bot"); err != nil {
+	if err := store.CreateInvite(ctx, group.ID, InviteOptions{MaxUses: &limit, ExpiresAt: &expires}); err != nil {
 		t.Fatal(err)
 	}
-	flash, err := store.TakeFlash(ctx, rawSession)
-	if err != nil {
-		t.Fatal(err)
-	}
-	prefix := "https://t.me/secret_santa_bot?start=join_"
-	if !strings.HasPrefix(flash, prefix) {
-		t.Fatalf("flash %s", flash)
-	}
-	token := strings.TrimPrefix(flash, prefix)
 	var stored []byte
-	err = pool.QueryRow(ctx, `SELECT token_hash FROM group_invites WHERE group_id = $1`, group.ID).Scan(&stored)
+	var token string
+	err = pool.QueryRow(ctx, `SELECT token_hash, token FROM group_invites WHERE group_id = $1`, group.ID).Scan(&stored, &token)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(stored, hashToken(token)) || bytes.Contains(stored, []byte(token)) {
-		t.Fatal("token hash was not stored")
+	if token == "" || !bytes.Equal(stored, hashToken(token)) || bytes.Contains(stored, []byte(token)) {
+		t.Fatal("invite token was not stored with its hash")
 	}
-	again, err := store.TakeFlash(ctx, rawSession)
-	if err != nil || again != "" {
-		t.Fatalf("second flash %q err %v", again, err)
+	detail, err := store.Group(ctx, group.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Invites) != 1 || detail.Invites[0].Token != token {
+		t.Fatalf("invite token not readable: %+v", detail.Invites)
 	}
 
 	listed, err := store.ListGroups(ctx)
@@ -103,7 +93,7 @@ func TestPostgresGroupsAndInvites(t *testing.T) {
 		t.Fatal("group missing from list")
 	}
 
-	detail, err := store.Group(ctx, group.ID)
+	detail, err = store.Group(ctx, group.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +117,7 @@ func TestPostgresGroupsAndInvites(t *testing.T) {
 	if err := store.ArchiveGroup(ctx, group.ID); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateInvite(ctx, rawSession, group.ID, InviteOptions{}, "secret_santa_bot"); err != ErrArchived {
+	if err := store.CreateInvite(ctx, group.ID, InviteOptions{}); err != ErrArchived {
 		t.Fatalf("archived invite err %v", err)
 	}
 }

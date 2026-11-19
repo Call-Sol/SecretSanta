@@ -232,7 +232,7 @@ func (s *Server) groupShow(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.renderGroup(w, r, id, "", true)
+	s.renderGroup(w, r, id, "")
 }
 
 func (s *Server) groupArchive(w http.ResponseWriter, r *http.Request) {
@@ -268,7 +268,7 @@ func (s *Server) inviteCreate(w http.ResponseWriter, r *http.Request) {
 	if !s.parseForm(w, r) {
 		return
 	}
-	raw, sess, ok := s.requireSession(w, r)
+	_, sess, ok := s.requireSession(w, r)
 	if !ok {
 		return
 	}
@@ -283,15 +283,15 @@ func (s *Server) inviteCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	opts, err := parseInviteOptions(r, time.Now())
 	if err != nil {
-		s.renderGroup(w, r, id, "Check the use limit and expiry date.", false)
+		s.renderGroup(w, r, id, "Check the use limit and expiry date.")
 		return
 	}
-	if err := s.store.CreateInvite(r.Context(), raw, id, opts, s.botUsername); err != nil {
+	if err := s.store.CreateInvite(r.Context(), id, opts); err != nil {
 		switch {
 		case errors.Is(err, ErrNotFound):
 			http.NotFound(w, r)
 		case errors.Is(err, ErrArchived):
-			s.renderGroup(w, r, id, "This group is archived.", false)
+			s.renderGroup(w, r, id, "This group is archived.")
 		default:
 			s.log.Error("create invite", "err", err, "group_id", id)
 			http.Error(w, "Something went wrong.", http.StatusInternalServerError)
@@ -331,7 +331,7 @@ func (s *Server) inviteRevoke(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, fmt.Sprintf("/groups/%d", groupID), http.StatusSeeOther)
 }
 
-func (s *Server) renderGroup(w http.ResponseWriter, r *http.Request, id int64, formError string, takeFlash bool) {
+func (s *Server) renderGroup(w http.ResponseWriter, r *http.Request, id int64, formError string) {
 	_, sess, ok := s.requireSession(w, r)
 	if !ok {
 		return
@@ -346,15 +346,9 @@ func (s *Server) renderGroup(w http.ResponseWriter, r *http.Request, id int64, f
 		http.Error(w, "Something went wrong.", http.StatusInternalServerError)
 		return
 	}
-	var flash string
-	if takeFlash {
-		if cookie, cookieErr := r.Cookie(sessionCookie); cookieErr == nil {
-			flash, err = s.store.TakeFlash(r.Context(), cookie.Value)
-			if err != nil {
-				s.log.Error("take flash", "err", err, "group_id", id)
-				http.Error(w, "Something went wrong.", http.StatusInternalServerError)
-				return
-			}
+	for i := range detail.Invites {
+		if detail.Invites[i].Token != "" {
+			detail.Invites[i].Link = Deeplink(s.botUsername, detail.Invites[i].Token)
 		}
 	}
 	s.render(w, "group", groupPage{
@@ -363,7 +357,6 @@ func (s *Server) renderGroup(w http.ResponseWriter, r *http.Request, id int64, f
 			Authed: true,
 			CSRF:   sess.CSRF,
 			Error:  formError,
-			Flash:  flash,
 		},
 		Detail: detail,
 	})

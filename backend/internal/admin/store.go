@@ -16,13 +16,12 @@ type Store interface {
 	CreateSession(ctx context.Context, ttl time.Duration) (rawToken string, csrf string, err error)
 	DeleteSession(ctx context.Context, rawToken string) error
 	Session(ctx context.Context, rawToken string) (Session, error)
-	TakeFlash(ctx context.Context, rawToken string) (string, error)
 
 	CreateGroup(ctx context.Context, name string) (Group, error)
 	ListGroups(ctx context.Context) ([]GroupSummary, error)
 	Group(ctx context.Context, id int64) (GroupDetail, error)
 	ArchiveGroup(ctx context.Context, id int64) error
-	CreateInvite(ctx context.Context, sessionRaw string, groupID int64, opts InviteOptions, botUsername string) error
+	CreateInvite(ctx context.Context, groupID int64, opts InviteOptions) error
 	RevokeInvite(ctx context.Context, inviteID int64) (groupID int64, err error)
 }
 
@@ -78,38 +77,6 @@ func (s *Postgres) Session(ctx context.Context, rawToken string) (Session, error
 		return Session{}, fmt.Errorf("lookup session: %w", err)
 	}
 	return sess, nil
-}
-
-func (s *Postgres) TakeFlash(ctx context.Context, rawToken string) (string, error) {
-	var flash *string
-	err := postgres.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `
-			SELECT flash
-			FROM admin_sessions
-			WHERE token_hash = $1 AND expires_at > now()
-			FOR UPDATE
-		`, hashToken(rawToken)).Scan(&flash)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrNotFound
-		}
-		if err != nil {
-			return err
-		}
-		_, err = tx.Exec(ctx, `
-			UPDATE admin_sessions SET flash = NULL WHERE token_hash = $1
-		`, hashToken(rawToken))
-		return err
-	})
-	if errors.Is(err, ErrNotFound) {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("take flash: %w", err)
-	}
-	if flash == nil {
-		return "", nil
-	}
-	return *flash, nil
 }
 
 func (s *Postgres) CreateGroup(ctx context.Context, name string) (Group, error) {
@@ -203,7 +170,7 @@ func (s *Postgres) Group(ctx context.Context, id int64) (GroupDetail, error) {
 	}
 
 	invites, err := s.pool.Query(ctx, `
-		SELECT id, created_at, expires_at, max_uses, used_count, revoked_at
+		SELECT id, created_at, expires_at, max_uses, used_count, revoked_at, token
 		FROM group_invites
 		WHERE group_id = $1
 		ORDER BY id DESC
@@ -215,8 +182,12 @@ func (s *Postgres) Group(ctx context.Context, id int64) (GroupDetail, error) {
 	now := time.Now()
 	for invites.Next() {
 		var inv Invite
-		if err := invites.Scan(&inv.ID, &inv.CreatedAt, &inv.ExpiresAt, &inv.MaxUses, &inv.UsedCount, &inv.RevokedAt); err != nil {
+		var token *string
+		if err := invites.Scan(&inv.ID, &inv.CreatedAt, &inv.ExpiresAt, &inv.MaxUses, &inv.UsedCount, &inv.RevokedAt, &token); err != nil {
 			return GroupDetail{}, fmt.Errorf("list invites: %w", err)
+		}
+		if token != nil {
+			inv.Token = *token
 		}
 		inv.decorate(now)
 		detail.Invites = append(detail.Invites, inv)
@@ -250,12 +221,11 @@ func (s *Postgres) ArchiveGroup(ctx context.Context, id int64) error {
 	return nil
 }
 
-func (s *Postgres) CreateInvite(ctx context.Context, sessionRaw string, groupID int64, opts InviteOptions, botUsername string) error {
+func (s *Postgres) CreateInvite(ctx context.Context, groupID int64, opts InviteOptions) error {
 	raw, tokenHash, err := newInviteToken()
 	if err != nil {
 		return err
 	}
-	link := Deeplink(botUsername, raw)
 	err = postgres.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
 		var status string
 		err := tx.QueryRow(ctx, `SELECT status FROM groups WHERE id = $1 FOR UPDATE`, groupID).Scan(&status)
@@ -269,24 +239,10 @@ func (s *Postgres) CreateInvite(ctx context.Context, sessionRaw string, groupID 
 			return ErrArchived
 		}
 		_, err = tx.Exec(ctx, `
-			INSERT INTO group_invites (group_id, token_hash, expires_at, max_uses)
-			VALUES ($1, $2, $3, $4)
-		`, groupID, tokenHash, opts.ExpiresAt, opts.MaxUses)
-		if err != nil {
-			return err
-		}
-		tag, err := tx.Exec(ctx, `
-			UPDATE admin_sessions
-			SET flash = $2
-			WHERE token_hash = $1 AND expires_at > now()
-		`, hashToken(sessionRaw), link)
-		if err != nil {
-			return err
-		}
-		if tag.RowsAffected() != 1 {
-			return ErrNotFound
-		}
-		return nil
+			INSERT INTO group_invites (group_id, token_hash, token, expires_at, max_uses)
+			VALUES ($1, $2, $3, $4, $5)
+		`, groupID, tokenHash, raw, opts.ExpiresAt, opts.MaxUses)
+		return err
 	})
 	if errors.Is(err, ErrNotFound) || errors.Is(err, ErrArchived) {
 		return err

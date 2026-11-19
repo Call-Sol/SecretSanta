@@ -45,7 +45,7 @@ type Member struct {
 	JoinedAt    time.Time
 }
 
-// Invite is a join link without its secret token.
+// Invite is one join link. Token is kept so the operator can show the link again.
 type Invite struct {
 	ID        int64
 	CreatedAt time.Time
@@ -53,6 +53,8 @@ type Invite struct {
 	MaxUses   *int
 	UsedCount int
 	RevokedAt *time.Time
+	Token     string
+	Link      string
 	State     string
 	Usage     string
 }

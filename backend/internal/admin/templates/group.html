@@ -12,13 +12,6 @@
     {{end}}
   </div>
   {{template "alert" .}}
-  {{if .Flash}}
-  <div class="alert alert-success" role="status">
-    <div class="fw-semibold mb-2">Deeplink, shown once</div>
-    <input class="form-control" readonly value="{{.Flash}}">
-    <div class="form-text">Copy it now. Opening this page again will not show the token.</div>
-  </div>
-  {{end}}
 
   {{if eq .Detail.Status "ACTIVE"}}
   <form method="post" action="/groups/{{.Detail.ID}}/invites" class="card shadow-sm mb-4">
@@ -53,6 +46,7 @@
         <thead>
           <tr>
             <th>Created</th>
+            <th>Link</th>
             <th>Status</th>
             <th>Uses</th>
             <th>Expires</th>
@@ -63,6 +57,13 @@
           {{range .Detail.Invites}}
           <tr>
             <td>{{formatTime .CreatedAt}}</td>
+            <td class="w-50">
+              {{if .Link}}
+              <input class="form-control form-control-sm" readonly value="{{.Link}}">
+              {{else}}
+              <span class="text-secondary">Unavailable</span>
+              {{end}}
+            </td>
             <td>
               {{if eq .State "Active"}}<span class="badge text-bg-success">Active</span>
               {{else if eq .State "Revoked"}}<span class="badge text-bg-secondary">Revoked</span>

@@ -110,8 +110,8 @@ func TestPanelLoginGroupsAndDeeplink(t *testing.T) {
 		t.Fatalf("link %s", link)
 	}
 	again := clientDo(t, client, http.MethodGet, groupURL, "")
-	if strings.Contains(again.Body, link) || strings.Contains(again.Body, "start=join_") {
-		t.Fatal("deeplink was shown twice")
+	if !strings.Contains(again.Body, link) {
+		t.Fatal("deeplink was hidden on reload")
 	}
 
 	revoked := clientDo(t, client, http.MethodPost, srv.URL+formAction(t, again.Body, "/invites/"), form(map[string]string{
@@ -121,8 +121,8 @@ func TestPanelLoginGroupsAndDeeplink(t *testing.T) {
 		t.Fatalf("revoke %d %s", revoked.StatusCode, revoked.Body)
 	}
 	after := clientDo(t, client, http.MethodGet, groupURL, "")
-	if !strings.Contains(after.Body, "Revoked") {
-		t.Fatalf("revoke status missing: %s", after.Body)
+	if !strings.Contains(after.Body, "Revoked") || !strings.Contains(after.Body, link) {
+		t.Fatalf("revoked invite should keep its link: %s", after.Body)
 	}
 
 	archived := clientDo(t, client, http.MethodPost, groupURL+"/archive", form(map[string]string{
@@ -252,7 +252,6 @@ type memStore struct {
 
 type memSession struct {
 	csrf    string
-	flash   string
 	expires time.Time
 }
 
@@ -299,19 +298,6 @@ func (m *memStore) Session(ctx context.Context, raw string) (Session, error) {
 		return Session{}, ErrNotFound
 	}
 	return Session{CSRF: sess.csrf, ExpiresAt: sess.expires}, nil
-}
-
-func (m *memStore) TakeFlash(ctx context.Context, raw string) (string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	sess, ok := m.sessions[raw]
-	if !ok {
-		return "", nil
-	}
-	flash := sess.flash
-	sess.flash = ""
-	m.sessions[raw] = sess
-	return flash, nil
 }
 
 func (m *memStore) CreateGroup(ctx context.Context, name string) (Group, error) {
@@ -370,7 +356,7 @@ func (m *memStore) ArchiveGroup(ctx context.Context, id int64) error {
 	return nil
 }
 
-func (m *memStore) CreateInvite(ctx context.Context, sessionRaw string, groupID int64, opts InviteOptions, botUsername string) error {
+func (m *memStore) CreateInvite(ctx context.Context, groupID int64, opts InviteOptions) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	g, ok := m.groups[groupID]
@@ -380,20 +366,20 @@ func (m *memStore) CreateInvite(ctx context.Context, sessionRaw string, groupID 
 	if g.Status != "ACTIVE" {
 		return ErrArchived
 	}
-	sess, ok := m.sessions[sessionRaw]
-	if !ok {
-		return ErrNotFound
-	}
 	raw, _, err := newInviteToken()
 	if err != nil {
 		return err
 	}
 	m.next++
-	inv := Invite{ID: m.next, CreatedAt: time.Now().UTC(), ExpiresAt: opts.ExpiresAt, MaxUses: opts.MaxUses}
+	inv := Invite{
+		ID:        m.next,
+		CreatedAt: time.Now().UTC(),
+		ExpiresAt: opts.ExpiresAt,
+		MaxUses:   opts.MaxUses,
+		Token:     raw,
+	}
 	inv.decorate(time.Now())
 	m.invites[inv.ID] = memInvite{Invite: inv, groupID: groupID}
-	sess.flash = Deeplink(botUsername, raw)
-	m.sessions[sessionRaw] = sess
 	return nil
 }
 
