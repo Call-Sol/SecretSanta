@@ -752,7 +752,7 @@ func TestDrawAsksForConfirmationThenRuns(t *testing.T) {
 
 func TestMineShowsOnlyTheCallerReceiver(t *testing.T) {
 	send := &memSend{}
-	runner := &memDraws{mine: draws.Mine{GameID: 5, GameName: "Игра", ReceiverName: "Борис"}}
+	runner := &memDraws{mine: draws.Mine{GameID: 5, GameName: "Игра", ReceiverName: "Борис", ReceiverUsername: "boris"}}
 	h := newHWithDraws(&memStore{}, &memGroups{}, &memGames{}, runner, send)
 	from := User{ID: 7, FirstName: "A"}
 	msg := &Message{MessageID: 4, Chat: Chat{ID: 7, Type: "private"}, From: &from}
@@ -767,7 +767,7 @@ func TestMineShowsOnlyTheCallerReceiver(t *testing.T) {
 			edited = m.text
 		}
 	}
-	if !strings.Contains(edited, "<b>Борис</b>") || strings.Contains(edited, "Анна") {
+	if !strings.Contains(edited, "Борис (@boris)") || strings.Contains(edited, "<b>") || strings.Contains(edited, "Анна") {
 		t.Fatalf("edited %q", edited)
 	}
 }

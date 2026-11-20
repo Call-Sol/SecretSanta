@@ -25,7 +25,7 @@ type ClientSender struct {
 	Client *telegram.Client
 }
 
-// SendAssignment sends the HTML message and a button that opens the same result again.
+// SendAssignment sends the draw message and a button that opens the same result again.
 func (s ClientSender) SendAssignment(ctx context.Context, chatID int64, text string, gameID int64) error {
 	var keyboard telegram.Keyboard
 	if gameID > 0 {
@@ -33,7 +33,7 @@ func (s ClientSender) SendAssignment(ctx context.Context, chatID int64, text str
 			{{Text: "Посмотреть получателя", Data: "game:mine:" + strconv.FormatInt(gameID, 10)}},
 		}}
 	}
-	return s.Client.SendMessageHTML(ctx, chatID, text, keyboard)
+	return s.Client.SendMessage(ctx, chatID, text, keyboard)
 }
 
 // Run sends due outbox rows until ctx is cancelled.

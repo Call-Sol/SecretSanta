@@ -198,7 +198,7 @@ func TestRunDrawQueuesPrivateMessages(t *testing.T) {
 	}{{base, owner}, {base + 1, first}, {base + 2, second}} {
 		body := chats[person.telegram]
 		receiver := names[edges[person.user]]
-		if !strings.Contains(body, "<b>"+receiver+"</b>") || !strings.Contains(body, "25 декабря") || !strings.Contains(body, "до 2000 ₽, красный") {
+		if !strings.Contains(body, "Ты даришь подарок: "+receiver) || strings.Contains(body, "<b>") || !strings.Contains(body, "25 декабря") || !strings.Contains(body, "до 2000 ₽, красный") {
 			t.Fatalf("chat %d body %q receiver %s", person.telegram, body, receiver)
 		}
 	}

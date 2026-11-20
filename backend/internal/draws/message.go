@@ -1,7 +1,6 @@
 package draws
 
 import (
-	"html"
 	"strconv"
 	"strings"
 	"time"
@@ -32,17 +31,18 @@ type AssignmentPayload struct {
 	ExchangeOn       string `json:"exchange_on,omitempty"`
 }
 
-// FormatAssignment renders the private draw message as Telegram HTML.
+// FormatAssignment renders the private draw message as plain text.
+// Telegram turns @username into a link; HTML tags would be shown literally.
 func FormatAssignment(gameName, receiver, username, description, exchange string) string {
 	var b strings.Builder
 	b.WriteString("🎁 Твой жребий готов!\n")
 	b.WriteString("Игра: ")
-	b.WriteString(html.EscapeString(gameName))
+	b.WriteString(gameName)
 	b.WriteString("\nТы даришь подарок: ")
-	b.WriteString(receiverHTML(receiver, username))
+	b.WriteString(receiverLine(receiver, username))
 	if description != "" {
 		b.WriteString("\nПожелания: ")
-		b.WriteString(html.EscapeString(description))
+		b.WriteString(description)
 	}
 	if day := formatExchange(exchange); day != "" {
 		b.WriteString("\nОбмен: ")
@@ -51,13 +51,12 @@ func FormatAssignment(gameName, receiver, username, description, exchange string
 	return b.String()
 }
 
-func receiverHTML(name, username string) string {
-	text := "<b>" + html.EscapeString(name) + "</b>"
+func receiverLine(name, username string) string {
 	username = strings.TrimPrefix(strings.TrimSpace(username), "@")
 	if username == "" || strings.ContainsAny(username, " \t\r\n/<>&\"'?#") {
-		return text
+		return name
 	}
-	return text + ` (<a href="https://t.me/` + username + `">@` + username + `</a>)`
+	return name + " (@" + username + ")"
 }
 
 func formatExchange(iso string) string {
