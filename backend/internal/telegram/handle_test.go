@@ -104,6 +104,8 @@ type memGames struct {
 	list      []games.Summary
 	people    []games.Participant
 	peopleErr error
+	invite    games.InviteResult
+	inviteErr error
 }
 
 func (m *memGames) Create(_ context.Context, _ int64, groupID int64, input games.Input) (games.View, error) {
@@ -122,6 +124,13 @@ func (m *memGames) Current(context.Context, int64, int64) (games.View, bool, err
 
 func (m *memGames) List(context.Context, int64) ([]games.Summary, error) {
 	return m.list, nil
+}
+
+func (m *memGames) AcceptInvite(context.Context, int64, string) (games.InviteResult, error) {
+	if m.inviteErr != nil {
+		return games.InviteResult{}, m.inviteErr
+	}
+	return m.invite, nil
 }
 
 func (m *memGames) Open(context.Context, int64, int64) (games.View, error) {
@@ -613,6 +622,37 @@ func TestOwnerSeesParticipantsByStatus(t *testing.T) {
 	}
 	if strings.Contains(edited, "Подтвердили:\n• Виктор") {
 		t.Fatalf("waiting person listed as confirmed: %q", edited)
+	}
+}
+
+func TestGameInviteConfirmsOnStart(t *testing.T) {
+	send := &memSend{}
+	directory := &memGroups{}
+	catalog := &memGames{invite: games.InviteResult{
+		View:      games.View{ID: 5, GroupID: 3, Name: "Тайный Санта 2026", Status: "REGISTRATION", Mine: games.Confirmed, Role: "MEMBER"},
+		GroupName: "Друзья",
+	}}
+	h := newHWithGames(&memStore{}, directory, catalog, send)
+	err := h.Handle(context.Background(), Update{
+		UpdateID: 60,
+		Message: &Message{
+			From: &User{ID: 8, FirstName: "Борис"},
+			Chat: Chat{ID: 8, Type: "private"},
+			Text: "/start play_abc",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if directory.joins != 0 {
+		t.Fatal("group invite was consumed")
+	}
+	got := send.msgs[0]
+	if !strings.Contains(got.text, "Ты присоединился к группе «Друзья» и участвуешь в игре «Тайный Санта 2026».") {
+		t.Fatalf("text %q", got.text)
+	}
+	if strings.Contains(strings.Join(got.data, ","), "Подтвердить") || strings.Contains(got.text, "play_abc") {
+		t.Fatalf("message %+v", got)
 	}
 }
 

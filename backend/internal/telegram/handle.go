@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"regexp"
 	"strings"
@@ -14,7 +15,7 @@ import (
 	"github.com/alekseymakarkin/secret-santa/internal/users"
 )
 
-var joinTokenLog = regexp.MustCompile(`join_[A-Za-z0-9_-]+`)
+var joinTokenLog = regexp.MustCompile(`(?:join|play)_[A-Za-z0-9_-]+`)
 
 // Store is the persistence for one polling process.
 type Store interface {
@@ -88,7 +89,7 @@ func (h *Handler) Handle(ctx context.Context, upd Update) error {
 		return nil
 	}
 	if err := h.reply(ctx, upd, userID); err != nil {
-		h.log.Error("telegram reply", "update_id", upd.UpdateID, "err", joinTokenLog.ReplaceAllString(err.Error(), "join_***"))
+		h.log.Error("telegram reply", "update_id", upd.UpdateID, "err", joinTokenLog.ReplaceAllString(err.Error(), "invite_***"))
 	}
 	return nil
 }
@@ -111,7 +112,7 @@ func (h *Handler) reply(ctx context.Context, upd Update, userID int64) error {
 		}
 		switch name {
 		case "start":
-			text, keyboard := h.startScreen(ctx, payload)
+			text, keyboard := h.startScreen(ctx, userID, payload)
 			return h.send.SendMessage(ctx, upd.ChatID(), text, keyboard)
 		case "help":
 			return h.send.SendMessage(ctx, upd.ChatID(), helpText, mainKeyboard())
@@ -139,21 +140,44 @@ func (h *Handler) reply(ctx context.Context, upd Update, userID int64) error {
 	}
 }
 
-func (h *Handler) startScreen(ctx context.Context, payload string) (string, Keyboard) {
-	token, ok := joinToken(payload)
+func (h *Handler) startScreen(ctx context.Context, userID int64, payload string) (string, Keyboard) {
 	if payload == "" {
 		return menuText, mainKeyboard()
 	}
-	if !ok {
-		return invalidLinkText, mainKeyboard()
+	if token, ok := joinToken(payload); ok {
+		preview, err := h.groups.Preview(ctx, token)
+		if err != nil {
+			h.log.Info("invite preview rejected", "err", err.Error())
+			return inviteInvalidText, mainKeyboard()
+		}
+		h.log.Info("invite preview", "invite_id", preview.InviteID, "group_id", preview.GroupID)
+		return joinPreviewScreen(preview)
 	}
-	preview, err := h.groups.Preview(ctx, token)
+	if token, ok := playToken(payload); ok {
+		return h.acceptGameInvite(ctx, userID, token)
+	}
+	return invalidLinkText, mainKeyboard()
+}
+
+func (h *Handler) acceptGameInvite(ctx context.Context, userID int64, token string) (string, Keyboard) {
+	result, err := h.games.AcceptInvite(ctx, userID, token)
+	if errors.Is(err, games.ErrRegistrationClosed) {
+		return registrationClosedText, mainKeyboard()
+	}
 	if err != nil {
-		h.log.Info("invite preview rejected", "err", err.Error())
+		if !errors.Is(err, games.ErrInviteInvalid) {
+			h.log.Error("game invite", "err", err.Error())
+		}
 		return inviteInvalidText, mainKeyboard()
 	}
-	h.log.Info("invite preview", "invite_id", preview.InviteID, "group_id", preview.GroupID)
-	return joinPreviewScreen(preview)
+	h.log.Info("game invite accepted", "game_id", result.ID, "group_id", result.GroupID, "already", result.AlreadyMember)
+	intro := fmt.Sprintf("🎄 Ты участвуешь в игре «%s».", result.Name)
+	if !result.AlreadyMember {
+		intro = fmt.Sprintf("🎄 Ты присоединился к группе «%s» и участвуешь в игре «%s».", result.GroupName, result.Name)
+	} else if result.AlreadyConfirmed {
+		intro = fmt.Sprintf("Ты уже участвуешь в игре «%s».", result.Name)
+	}
+	return h.showGame(result.View, intro)
 }
 
 func (h *Handler) createGroup(ctx context.Context, chatID, userID int64, name string) error {
@@ -312,6 +336,17 @@ func (h *Handler) acceptScreen(ctx context.Context, userID, inviteID int64) (str
 	h.log.Info("invite accepted", "invite_id", inviteID, "group_id", result.GroupID, "already", result.AlreadyMember)
 	text, keyboard := joinedScreen(result)
 	return text, keyboard, ""
+}
+
+func playToken(payload string) (string, bool) {
+	if !strings.HasPrefix(payload, "play_") {
+		return "", false
+	}
+	token := strings.TrimPrefix(payload, "play_")
+	if token == "" || strings.ContainsAny(token, " \t\r\n/?#") {
+		return "", false
+	}
+	return token, true
 }
 
 func joinToken(payload string) (string, bool) {

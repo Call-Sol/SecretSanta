@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/alekseymakarkin/secret-santa/internal/platform/postgres"
@@ -30,7 +31,8 @@ const viewSelect = `
 	       (SELECT count(*) FROM game_participants ap WHERE ap.game_id = g.id),
 	       COALESCE(p.status, ''),
 	       COALESCE(p.assignment_state, ''),
-	       m.role
+	       m.role,
+	       g.invite_token
 	FROM games g
 	JOIN group_members m ON m.group_id = g.group_id AND m.user_id = $1 AND m.status = 'ACTIVE'
 	LEFT JOIN game_participants p ON p.game_id = g.id AND p.user_id = $1
@@ -53,6 +55,10 @@ func (s *Postgres) Create(ctx context.Context, userID, groupID int64, input Inpu
 		if _, err := time.Parse("2006-01-02", input.Exchange); err != nil {
 			return View{}, ErrInvalidDate
 		}
+	}
+	token, tokenHash, err := newInviteToken()
+	if err != nil {
+		return View{}, err
 	}
 	var gameID int64
 	err = postgres.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
@@ -91,10 +97,13 @@ func (s *Postgres) Create(ctx context.Context, userID, groupID int64, input Inpu
 			exchange = input.Exchange
 		}
 		err = tx.QueryRow(ctx, `
-			INSERT INTO games (group_id, name, status, description, registration_deadline, exchange_on, created_by)
-			VALUES ($1, $2, 'REGISTRATION', $3, $4, $5, $6)
+			INSERT INTO games (
+				group_id, name, status, description, registration_deadline, exchange_on, created_by,
+				invite_token, invite_token_hash
+			)
+			VALUES ($1, $2, 'REGISTRATION', $3, $4, $5, $6, $7, $8)
 			RETURNING id
-		`, groupID, name, descriptionValue, deadline, exchange, userID).Scan(&gameID)
+		`, groupID, name, descriptionValue, deadline, exchange, userID, token, tokenHash).Scan(&gameID)
 		if isUnique(err) {
 			return ErrCurrentGameExists
 		}
@@ -133,6 +142,10 @@ func (s *Postgres) Current(ctx context.Context, userID, groupID int64) (View, bo
 	if err != nil {
 		return View{}, false, fmt.Errorf("current game: %w", err)
 	}
+	view, err = s.present(ctx, view)
+	if err != nil {
+		return View{}, false, err
+	}
 	return view, true, nil
 }
 
@@ -153,7 +166,104 @@ func (s *Postgres) Open(ctx context.Context, userID, gameID int64) (View, error)
 	if err != nil {
 		return View{}, fmt.Errorf("open game: %w", err)
 	}
-	return view, nil
+	return s.present(ctx, view)
+}
+
+// AcceptInvite joins the group when needed and confirms this game.
+// A person who already refused is confirmed, because opening this link is that choice.
+func (s *Postgres) AcceptInvite(ctx context.Context, userID int64, token string) (InviteResult, error) {
+	if strings.TrimSpace(token) == "" {
+		return InviteResult{}, ErrInviteInvalid
+	}
+	var result InviteResult
+	var gameID int64
+	err := postgres.WithTx(ctx, s.pool, func(tx pgx.Tx) error {
+		var groupStatus, gameStatus string
+		var deadline *time.Time
+		err := tx.QueryRow(ctx, `
+			SELECT g.id, g.group_id, gr.name, gr.status, g.status, g.registration_deadline
+			FROM games g
+			JOIN groups gr ON gr.id = g.group_id
+			WHERE g.invite_token_hash = $1
+			FOR UPDATE OF g, gr
+		`, hashToken(token)).Scan(&gameID, &result.GroupID, &result.GroupName, &groupStatus, &gameStatus, &deadline)
+		if errors.Is(err, pgx.ErrNoRows) || (err == nil && groupStatus != "ACTIVE") {
+			return ErrInviteInvalid
+		}
+		if err != nil {
+			return err
+		}
+		if gameStatus != "REGISTRATION" || (deadline != nil && !deadline.After(time.Now())) {
+			return ErrRegistrationClosed
+		}
+		var memberStatus string
+		memberErr := tx.QueryRow(ctx, `
+			SELECT status FROM group_members
+			WHERE group_id = $1 AND user_id = $2
+			FOR UPDATE
+		`, result.GroupID, userID).Scan(&memberStatus)
+		if memberErr != nil && !errors.Is(memberErr, pgx.ErrNoRows) {
+			return memberErr
+		}
+		if memberErr == nil && memberStatus == "ACTIVE" {
+			result.AlreadyMember = true
+		} else if errors.Is(memberErr, pgx.ErrNoRows) {
+			_, err = tx.Exec(ctx, `
+				INSERT INTO group_members (group_id, user_id, role, status)
+				VALUES ($1, $2, 'MEMBER', 'ACTIVE')
+			`, result.GroupID, userID)
+			if err != nil {
+				return err
+			}
+		} else {
+			_, err = tx.Exec(ctx, `
+				UPDATE group_members
+				SET status = 'ACTIVE', left_at = NULL, joined_at = now()
+				WHERE group_id = $1 AND user_id = $2
+			`, result.GroupID, userID)
+			if err != nil {
+				return err
+			}
+		}
+		var previous string
+		partErr := tx.QueryRow(ctx, `
+			SELECT status FROM game_participants
+			WHERE game_id = $1 AND user_id = $2
+			FOR UPDATE
+		`, gameID, userID).Scan(&previous)
+		if errors.Is(partErr, pgx.ErrNoRows) {
+			_, err = tx.Exec(ctx, `
+				INSERT INTO game_participants (game_id, user_id, status, assignment_state, confirmed_at)
+				VALUES ($1, $2, 'CONFIRMED', 'NOT_APPLICABLE', now())
+			`, gameID, userID)
+			return err
+		}
+		if partErr != nil {
+			return partErr
+		}
+		if previous == Confirmed {
+			result.AlreadyConfirmed = true
+			return nil
+		}
+		_, err = tx.Exec(ctx, `
+			UPDATE game_participants
+			SET status = 'CONFIRMED', confirmed_at = now()
+			WHERE game_id = $1 AND user_id = $2
+		`, gameID, userID)
+		return err
+	})
+	if err != nil {
+		if errors.Is(err, ErrInviteInvalid) || errors.Is(err, ErrRegistrationClosed) {
+			return InviteResult{}, err
+		}
+		return InviteResult{}, fmt.Errorf("accept game invite: %w", err)
+	}
+	view, err := s.Open(ctx, userID, gameID)
+	if err != nil {
+		return InviteResult{}, err
+	}
+	result.View = view
+	return result, nil
 }
 
 // Decide records confirm or decline while registration is open.
@@ -310,9 +420,10 @@ func scanView(row pgx.Row) (View, error) {
 	var description *string
 	var deadline *time.Time
 	var exchange *string
+	var invite *string
 	err := row.Scan(
 		&view.ID, &view.GroupID, &view.Name, &view.Status, &description, &deadline, &exchange,
-		&view.Confirmed, &view.Participants, &view.Mine, &view.Assignment, &view.Role,
+		&view.Confirmed, &view.Participants, &view.Mine, &view.Assignment, &view.Role, &invite,
 	)
 	if err != nil {
 		return View{}, err
@@ -324,7 +435,47 @@ func scanView(row pgx.Row) (View, error) {
 	if exchange != nil {
 		view.Exchange = *exchange
 	}
+	if invite != nil {
+		view.InviteToken = *invite
+	}
 	return view, nil
+}
+
+func (s *Postgres) present(ctx context.Context, view View) (View, error) {
+	if view.Role != "OWNER" && view.Role != "ADMIN" {
+		view.InviteToken = ""
+		return view, nil
+	}
+	if view.InviteToken != "" {
+		return view, nil
+	}
+	token, err := s.ensureInvite(ctx, view.ID)
+	if err != nil {
+		return View{}, err
+	}
+	view.InviteToken = token
+	return view, nil
+}
+
+func (s *Postgres) ensureInvite(ctx context.Context, gameID int64) (string, error) {
+	token, hash, err := newInviteToken()
+	if err != nil {
+		return "", err
+	}
+	var stored *string
+	err = s.pool.QueryRow(ctx, `
+		UPDATE games
+		SET invite_token = $2, invite_token_hash = $3, updated_at = now()
+		WHERE id = $1 AND invite_token IS NULL
+		RETURNING invite_token
+	`, gameID, token, hash).Scan(&stored)
+	if errors.Is(err, pgx.ErrNoRows) {
+		err = s.pool.QueryRow(ctx, `SELECT invite_token FROM games WHERE id = $1`, gameID).Scan(&stored)
+	}
+	if err != nil || stored == nil || *stored == "" {
+		return "", fmt.Errorf("game invite: %w", err)
+	}
+	return *stored, nil
 }
 
 func isUnique(err error) bool {

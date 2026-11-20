@@ -29,6 +29,8 @@ var (
 	ErrCurrentGameExists = errors.New("current game exists")
 	// ErrRegistrationClosed means confirmation is no longer accepted.
 	ErrRegistrationClosed = errors.New("registration closed")
+	// ErrInviteInvalid means this game link cannot be used.
+	ErrInviteInvalid = errors.New("game invite invalid")
 )
 
 // NormalizeName trims a game name and checks its length.

@@ -187,6 +187,104 @@ func TestCreateGameKeepsMembersPending(t *testing.T) {
 	}
 }
 
+func TestGameInviteConfirmsParticipation(t *testing.T) {
+	dsn := os.Getenv("DATABASE_URL")
+	if dsn == "" {
+		t.Fatal("DATABASE_URL is required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := postgres.MigrateUp(ctx, dsn); err != nil {
+		t.Fatal(err)
+	}
+	pool, err := postgres.NewPool(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+
+	base := time.Now().UnixNano()
+	owner := insertUser(t, ctx, pool, base+20, "Анна")
+	guest := insertUser(t, ctx, pool, base+21, "Борис")
+	newcomer := insertUser(t, ctx, pool, base+22, "Виктор")
+	late := insertUser(t, ctx, pool, base+23, "Глеб")
+	directory := groups.NewPostgres(pool)
+	catalog := games.NewPostgres(pool)
+	created, err := directory.Create(ctx, owner, "Друзья")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM game_participants WHERE game_id IN (SELECT id FROM games WHERE group_id = $1)`, created.ID)
+		_, _ = pool.Exec(bg, `DELETE FROM games WHERE group_id = $1`, created.ID)
+		_, _ = pool.Exec(bg, `DELETE FROM group_invites WHERE group_id = $1`, created.ID)
+		_, _ = pool.Exec(bg, `DELETE FROM group_members WHERE group_id = $1`, created.ID)
+		_, _ = pool.Exec(bg, `DELETE FROM groups WHERE id = $1`, created.ID)
+		_, _ = pool.Exec(bg, `DELETE FROM users WHERE id = ANY($1)`, []int64{owner, guest, newcomer, late})
+	})
+	preview, err := directory.Preview(ctx, created.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := directory.Accept(ctx, guest, preview.InviteID); err != nil {
+		t.Fatal(err)
+	}
+	view, err := catalog.Create(ctx, owner, created.ID, games.Input{Name: "Тайный Санта 2026"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.InviteToken == "" || view.Role != "OWNER" {
+		t.Fatalf("owner token missing %+v", view)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE games SET invite_token = NULL, invite_token_hash = NULL WHERE id = $1`, view.ID); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := catalog.Open(ctx, owner, view.ID)
+	if err != nil || reopened.InviteToken == "" {
+		t.Fatalf("reopened %+v err %v", reopened, err)
+	}
+	view.InviteToken = reopened.InviteToken
+	guestView, err := catalog.Open(ctx, guest, view.ID)
+	if err != nil || guestView.InviteToken != "" || guestView.Mine != games.Pending {
+		t.Fatalf("guest %+v err %v", guestView, err)
+	}
+	if _, err := catalog.Decide(ctx, guest, view.ID, games.Declined); err != nil {
+		t.Fatal(err)
+	}
+	joined, err := catalog.AcceptInvite(ctx, guest, view.InviteToken)
+	if err != nil || !joined.AlreadyMember || joined.AlreadyConfirmed || joined.Mine != games.Confirmed || joined.GroupName != "Друзья" {
+		t.Fatalf("declined invite %+v err %v", joined, err)
+	}
+	again, err := catalog.AcceptInvite(ctx, guest, view.InviteToken)
+	if err != nil || !again.AlreadyConfirmed || again.Mine != games.Confirmed {
+		t.Fatalf("repeat %+v err %v", again, err)
+	}
+	fresh, err := catalog.AcceptInvite(ctx, newcomer, view.InviteToken)
+	if err != nil || fresh.AlreadyMember || fresh.Mine != games.Confirmed || fresh.Role != "MEMBER" {
+		t.Fatalf("newcomer %+v err %v", fresh, err)
+	}
+	var role string
+	err = pool.QueryRow(ctx, `SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2`, created.ID, newcomer).Scan(&role)
+	if err != nil || role != "MEMBER" {
+		t.Fatalf("role %s err %v", role, err)
+	}
+	if _, err := catalog.AcceptInvite(ctx, late, "not-a-real-token"); err != games.ErrInviteInvalid {
+		t.Fatalf("bad token %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE games SET registration_deadline = now() - interval '1 minute' WHERE id = $1`, view.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := catalog.AcceptInvite(ctx, late, view.InviteToken); err != games.ErrRegistrationClosed {
+		t.Fatalf("closed %v", err)
+	}
+	var members int
+	err = pool.QueryRow(ctx, `SELECT count(*) FROM group_members WHERE group_id = $1 AND user_id = $2`, created.ID, late).Scan(&members)
+	if err != nil || members != 0 {
+		t.Fatalf("late joined %d err %v", members, err)
+	}
+}
+
 func assertStatus(t *testing.T, ctx context.Context, pool *pgxpool.Pool, gameID, userID int64, status string) {
 	t.Helper()
 	var got string

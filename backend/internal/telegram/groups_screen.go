@@ -119,6 +119,13 @@ func buttonLabel(name string) string {
 	return string(runes[:63]) + "…"
 }
 
+func playLink(botUsername, token string) string {
+	if botUsername == "" || token == "" {
+		return ""
+	}
+	return "https://t.me/" + botUsername + "?start=play_" + token
+}
+
 func deeplink(botUsername, token string) string {
 	if botUsername == "" || token == "" {
 		return ""

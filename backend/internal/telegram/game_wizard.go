@@ -36,7 +36,7 @@ func (h *Handler) startGame(ctx context.Context, userID, groupID int64) (string,
 		return unavailableText, mainKeyboard(), ""
 	}
 	if ok {
-		text, keyboard := gameCardScreen(current, currentGameExistsText)
+		text, keyboard := h.showGame(current, currentGameExistsText)
 		return text, keyboard, ""
 	}
 	raw, err := json.Marshal(gameDraft{GroupID: groupID})
@@ -62,7 +62,7 @@ func (h *Handler) gameScreen(ctx context.Context, userID, gameID int64) (string,
 		h.log.Error("open game", "game_id", gameID, "err", err.Error())
 		return unavailableText, mainKeyboard(), ""
 	}
-	text, keyboard := gameCardScreen(view, "")
+	text, keyboard := h.showGame(view, "")
 	return text, keyboard, ""
 }
 
@@ -108,7 +108,7 @@ func (h *Handler) decideGame(ctx context.Context, userID, gameID int64, status s
 		h.log.Error("decide game", "game_id", gameID, "err", err.Error())
 		return unavailableText, mainKeyboard(), ""
 	}
-	text, keyboard := gameCardScreen(view, "")
+	text, keyboard := h.showGame(view, "")
 	return text, keyboard, ""
 }
 
@@ -192,7 +192,7 @@ func (h *Handler) finishGame(ctx context.Context, chatID, userID int64, draft ga
 		return h.send.SendMessage(ctx, chatID, gameFailedText, mainKeyboard())
 	}
 	h.log.Info("game created", "game_id", view.ID, "group_id", view.GroupID)
-	card, keyboard := gameCardScreen(view, "Игра создана.")
+	card, keyboard := h.showGame(view, "Игра создана.")
 	return h.send.SendMessage(ctx, chatID, card, keyboard)
 }
 

@@ -25,7 +25,15 @@ func gameListScreen(items []games.Summary) (string, Keyboard) {
 	return b.String(), Keyboard{Rows: rows}
 }
 
-func gameCardScreen(view games.View, intro string) (string, Keyboard) {
+func (h *Handler) showGame(view games.View, intro string) (string, Keyboard) {
+	link := ""
+	if view.Role == "OWNER" || view.Role == "ADMIN" {
+		link = playLink(h.username, view.InviteToken)
+	}
+	return gameCardScreen(view, intro, link)
+}
+
+func gameCardScreen(view games.View, intro, inviteLink string) (string, Keyboard) {
 	var b strings.Builder
 	if intro != "" {
 		b.WriteString(intro)
@@ -42,7 +50,7 @@ func gameCardScreen(view games.View, intro string) (string, Keyboard) {
 	case games.Declined:
 		b.WriteString("\n\nТы отказался от участия.")
 	}
-	rows := make([][]Button, 0, 5)
+	rows := make([][]Button, 0, 6)
 	if registrationOpen(view) && view.Mine != "" {
 		if view.Mine != games.Confirmed {
 			rows = append(rows, []Button{{Text: "Подтвердить участие", Data: fmt.Sprintf("game:confirm:%d", view.ID)}})
@@ -59,6 +67,10 @@ func gameCardScreen(view games.View, intro string) (string, Keyboard) {
 	}
 	if view.Assignment == "ASSIGNED" {
 		rows = append(rows, []Button{{Text: "Посмотреть получателя", Data: fmt.Sprintf("game:mine:%d", view.ID)}})
+	}
+	if inviteLink != "" && registrationOpen(view) && (view.Role == "OWNER" || view.Role == "ADMIN") {
+		fmt.Fprintf(&b, "\n\nСсылка для участия:\n%s", inviteLink)
+		rows = append(rows, []Button{{Text: "Пригласить в игру", Copy: inviteLink}})
 	}
 	rows = append(rows, []Button{{Text: "К группе", Data: fmt.Sprintf("grp:open:%d", view.GroupID)}})
 	return b.String(), Keyboard{Rows: rows}

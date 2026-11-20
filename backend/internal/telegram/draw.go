@@ -54,7 +54,7 @@ func (h *Handler) drawConfirm(ctx context.Context, userID, gameID int64) (string
 	if err != nil {
 		return drawDoneText, mainKeyboard(), ""
 	}
-	text, keyboard := gameCardScreen(view, drawDoneText)
+	text, keyboard := h.showGame(view, drawDoneText)
 	return text, keyboard, ""
 }
 
