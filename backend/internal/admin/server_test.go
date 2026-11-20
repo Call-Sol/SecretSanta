@@ -158,6 +158,61 @@ func TestParseInviteOptions(t *testing.T) {
 	}
 }
 
+func TestUsersPageListsRegisteredPeople(t *testing.T) {
+	started := time.Date(2026, 11, 20, 7, 0, 0, 0, time.UTC)
+	store := newMemStore()
+	store.people = []RegisteredUser{{
+		ID:          1,
+		TelegramID:  4242,
+		Username:    "anna",
+		DisplayName: "Anna",
+		DMStartedAt: &started,
+		CreatedAt:   started,
+		GroupCount:  1,
+	}}
+	panel, err := New(store, Options{
+		Username:    "operator",
+		Password:    "test-password",
+		BotUsername: "secret_santa_bot",
+		SessionTTL:  time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(panel.Handler())
+	t.Cleanup(srv.Close)
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+
+	guest := clientDo(t, client, http.MethodGet, srv.URL+"/users", "")
+	if guest.StatusCode != http.StatusSeeOther || guest.Header.Get("Location") != "/login" {
+		t.Fatalf("guest %d %s", guest.StatusCode, guest.Header.Get("Location"))
+	}
+	loginPage := clientDo(t, client, http.MethodGet, srv.URL+"/login", "")
+	signedIn := clientDo(t, client, http.MethodPost, srv.URL+"/login", form(map[string]string{
+		"username": "operator",
+		"password": "test-password",
+		"csrf":     csrfValue(t, loginPage.Body),
+	}))
+	if signedIn.StatusCode != http.StatusSeeOther {
+		t.Fatalf("login %d %s", signedIn.StatusCode, signedIn.Body)
+	}
+	page := clientDo(t, client, http.MethodGet, srv.URL+"/users", "")
+	if page.StatusCode != http.StatusOK {
+		t.Fatalf("users %d %s", page.StatusCode, page.Body)
+	}
+	for _, part := range []string{"Anna", "@anna", "4242", "20 Nov 2026 07:00 UTC", ">1<"} {
+		if !strings.Contains(page.Body, part) {
+			t.Fatalf("page missing %s: %s", part, page.Body)
+		}
+	}
+}
+
 type response struct {
 	StatusCode int
 	Header     http.Header
@@ -285,6 +340,7 @@ type memStore struct {
 	sessions map[string]memSession
 	groups   map[int64]*Group
 	invites  map[int64]memInvite
+	people   []RegisteredUser
 	next     int64
 }
 
@@ -349,6 +405,12 @@ func (m *memStore) CreateGroup(ctx context.Context, name string) (Group, error) 
 	g := Group{ID: m.next, Name: name, Status: "ACTIVE", CreatedAt: time.Now().UTC()}
 	m.groups[g.ID] = &g
 	return g, nil
+}
+
+func (m *memStore) ListUsers(context.Context) ([]RegisteredUser, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]RegisteredUser(nil), m.people...), nil
 }
 
 func (m *memStore) ListGroups(context.Context) ([]GroupSummary, error) {

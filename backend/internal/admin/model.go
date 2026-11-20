@@ -36,6 +36,17 @@ type GroupSummary struct {
 	ActiveInvites int
 }
 
+// RegisteredUser is a person who has opened the bot.
+type RegisteredUser struct {
+	ID          int64
+	TelegramID  int64
+	Username    string
+	DisplayName string
+	DMStartedAt *time.Time
+	CreatedAt   time.Time
+	GroupCount  int
+}
+
 // Member is one person in a group.
 type Member struct {
 	DisplayName string

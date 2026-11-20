@@ -19,6 +19,7 @@ type Store interface {
 
 	CreateGroup(ctx context.Context, name string) (Group, error)
 	ListGroups(ctx context.Context) ([]GroupSummary, error)
+	ListUsers(ctx context.Context) ([]RegisteredUser, error)
 	Group(ctx context.Context, id int64) (GroupDetail, error)
 	ArchiveGroup(ctx context.Context, id int64) error
 	CreateInvite(ctx context.Context, groupID int64, opts InviteOptions) error
@@ -127,6 +128,40 @@ func (s *Postgres) ListGroups(ctx context.Context) ([]GroupSummary, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list groups: %w", err)
+	}
+	return out, nil
+}
+
+func (s *Postgres) ListUsers(ctx context.Context) ([]RegisteredUser, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT u.id, u.telegram_id, u.username, u.display_name, u.dm_started_at, u.created_at,
+			(SELECT count(*) FROM group_members m
+			  WHERE m.user_id = u.id AND m.status = 'ACTIVE')
+		FROM users u
+		ORDER BY u.created_at DESC, u.id DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+	defer rows.Close()
+
+	var out []RegisteredUser
+	for rows.Next() {
+		var item RegisteredUser
+		var username *string
+		if err := rows.Scan(
+			&item.ID, &item.TelegramID, &username, &item.DisplayName,
+			&item.DMStartedAt, &item.CreatedAt, &item.GroupCount,
+		); err != nil {
+			return nil, fmt.Errorf("list users: %w", err)
+		}
+		if username != nil {
+			item.Username = *username
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
 	}
 	return out, nil
 }

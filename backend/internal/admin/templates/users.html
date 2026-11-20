@@ -1,0 +1,42 @@
+{{define "users"}}
+{{template "head" .}}
+{{template "nav" .}}
+<main class="container pb-5">
+  <h1 class="h3 mb-3">Users</h1>
+  {{if not .Users}}
+  <div class="card shadow-sm">
+    <div class="card-body text-secondary">No one has started the bot yet.</div>
+  </div>
+  {{else}}
+  <div class="card shadow-sm">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Username</th>
+            <th>Telegram ID</th>
+            <th>Groups</th>
+            <th>Chat started</th>
+            <th>Registered</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Users}}
+          <tr>
+            <td>{{.DisplayName}}</td>
+            <td>{{if .Username}}@{{.Username}}{{else}}—{{end}}</td>
+            <td>{{.TelegramID}}</td>
+            <td>{{.GroupCount}}</td>
+            <td>{{formatOptionalTime .DMStartedAt}}</td>
+            <td>{{formatTime .CreatedAt}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {{end}}
+</main>
+{{template "foot" .}}
+{{end}}

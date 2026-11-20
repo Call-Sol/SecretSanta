@@ -100,6 +100,20 @@ func TestPostgresGroupsAndInvites(t *testing.T) {
 	if len(detail.Members) != 1 || detail.Members[0].DisplayName != "Anna" || detail.Members[0].Username != "anna" {
 		t.Fatalf("members %+v", detail.Members)
 	}
+	people, err := store.ListUsers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var registered *RegisteredUser
+	for i := range people {
+		if people[i].ID == userID {
+			registered = &people[i]
+			break
+		}
+	}
+	if registered == nil || registered.DisplayName != "Anna" || registered.Username != "anna" || registered.GroupCount != 1 {
+		t.Fatalf("registered user %+v", registered)
+	}
 	if len(detail.Invites) != 1 || detail.Invites[0].State != "Active" || detail.Invites[0].Usage != "0 / 2" {
 		t.Fatalf("invites %+v", detail.Invites)
 	}
