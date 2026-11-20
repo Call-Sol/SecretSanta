@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/alekseymakarkin/secret-santa/internal/games"
 	"github.com/alekseymakarkin/secret-santa/internal/platform/postgres"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -269,6 +270,12 @@ func (s *Postgres) Accept(ctx context.Context, userID, inviteID int64) (Join, er
 			if err != nil {
 				return err
 			}
+			gameID, gameName, err := games.EnrollNewMember(ctx, tx, joined.GroupID, userID)
+			if err != nil {
+				return err
+			}
+			joined.GameID = gameID
+			joined.GameName = gameName
 		}
 		return tx.QueryRow(ctx, `
 			SELECT count(*) FROM group_members

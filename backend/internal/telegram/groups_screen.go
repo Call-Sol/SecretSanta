@@ -5,6 +5,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/alekseymakarkin/secret-santa/internal/games"
 	"github.com/alekseymakarkin/secret-santa/internal/groups"
 )
 
@@ -29,15 +30,21 @@ func groupListScreen(items []groups.Summary) (string, Keyboard) {
 	return b.String(), Keyboard{Rows: rows}
 }
 
-func groupCardScreen(card groups.Card, link string) (string, Keyboard) {
+func groupCardScreen(card groups.Card, link string, game *games.View) (string, Keyboard) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "👥 %s\nУчастников: %d", card.Name, card.MemberCount)
-	rows := make([][]Button, 0, 3)
+	rows := make([][]Button, 0, 4)
 	if card.Role == "OWNER" {
 		b.WriteString("\nТы: владелец")
 		rows = append(rows, []Button{{Text: "Участники", Data: fmt.Sprintf("grp:members:%d", card.ID)}})
 	} else if card.OwnerName != "" {
 		fmt.Fprintf(&b, "\nВладелец: %s", card.OwnerName)
+	}
+	if game != nil {
+		fmt.Fprintf(&b, "\nТекущая игра: %s", game.Name)
+		rows = append(rows, []Button{{Text: "Текущая игра", Data: fmt.Sprintf("game:open:%d", game.ID)}})
+	} else if card.Role == "OWNER" || card.Role == "ADMIN" {
+		rows = append(rows, []Button{{Text: "Создать игру", Data: fmt.Sprintf("game:create:%d", card.ID)}})
 	}
 	if link != "" {
 		fmt.Fprintf(&b, "\n\nСсылка для приглашения:\n%s", link)
@@ -77,10 +84,20 @@ func joinedScreen(result groups.Join) (string, Keyboard) {
 		text = fmt.Sprintf("Ты уже состоишь в группе «%s».\nУчастников: %d", result.GroupName, result.MemberCount)
 	} else {
 		text = fmt.Sprintf("🎄 Ты присоединился к группе «%s»!\nУчастников: %d", result.GroupName, result.MemberCount)
+		if result.GameName != "" {
+			text += fmt.Sprintf("\nТы автоматически зарегистрирован в игре «%s».", result.GameName)
+		}
 	}
-	return text, Keyboard{Rows: [][]Button{
+	rows := [][]Button{
 		{{Text: "Посмотреть участников", Data: fmt.Sprintf("grp:members:%d", result.GroupID)}},
-	}}
+	}
+	if result.GameID != 0 {
+		rows = append(rows, []Button{
+			{Text: "Текущая игра", Data: fmt.Sprintf("game:open:%d", result.GameID)},
+			{Text: "Отказаться", Data: fmt.Sprintf("game:decline:%d", result.GameID)},
+		})
+	}
+	return text, Keyboard{Rows: rows}
 }
 
 func roleLabel(role string) string {

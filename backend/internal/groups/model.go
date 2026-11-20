@@ -47,6 +47,8 @@ type Join struct {
 	GroupName     string
 	MemberCount   int
 	AlreadyMember bool
+	GameID        int64
+	GameName      string
 }
 
 // Directory is how the bot creates groups and accepts invites.

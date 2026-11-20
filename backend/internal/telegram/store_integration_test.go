@@ -32,6 +32,7 @@ func TestClaimUpsertsUserOnce(t *testing.T) {
 	telegramID := time.Now().UnixNano()
 	updateID := telegramID
 	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM bot_sessions WHERE user_id IN (SELECT id FROM users WHERE telegram_id = $1)`, telegramID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM processed_updates WHERE update_id = $1`, updateID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE telegram_id = $1`, telegramID)
 	})
@@ -59,8 +60,12 @@ func TestClaimUpsertsUserOnce(t *testing.T) {
 		t.Fatalf("stored name %q started %v", name, started)
 	}
 
-	names, err := store.ActiveGroupNames(ctx, userID)
-	if err != nil || len(names) != 0 {
-		t.Fatalf("groups %v err %v", names, err)
+	raw := []byte(`{"group_id":1,"name":"Игра"}`)
+	if err := store.SaveSession(ctx, userID, "game_budget", raw); err != nil {
+		t.Fatal(err)
+	}
+	state, got, err := store.Session(ctx, userID, time.Hour)
+	if err != nil || state != "game_budget" || string(got) == "" {
+		t.Fatalf("session %q %s err %v", state, got, err)
 	}
 }

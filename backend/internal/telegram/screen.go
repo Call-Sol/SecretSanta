@@ -43,3 +43,27 @@ const notMemberText = "Ты не состоишь в этой группе."
 const unavailableText = "Это действие больше недоступно."
 
 const createFailedText = "Не получилось создать группу. Попробуй ещё раз."
+
+const askGameNameText = "Как назовём игру? Можно до 80 символов.\nОтмена — чтобы вернуться в меню."
+
+const askGameBudgetText = "Бюджет в рублях? Напиши число, или «-», если без бюджета.\nОтмена — чтобы вернуться в меню."
+
+const askGameDeadlineText = "До какой даты идёт регистрация? Формат ДД.ММ.ГГГГ, или «-» без срока.\nОтмена — чтобы вернуться в меню."
+
+const askGameExchangeText = "Дата обмена подарками? Формат ДД.ММ.ГГГГ, или «-».\nОтмена — чтобы вернуться в меню."
+
+const invalidBudgetText = "Нужно целое число рублей или «-»."
+
+const invalidDateText = "Нужна дата в формате ДД.ММ.ГГГГ или «-»."
+
+const pastDateText = "Эта дата уже прошла. Укажи сегодня или позже, или «-»."
+
+const forbiddenText = "Недостаточно прав."
+
+const currentGameExistsText = "В группе уже есть незавершённая игра."
+
+const gameFailedText = "Не получилось создать игру. Попробуй ещё раз."
+
+const registrationClosedText = "Регистрация уже закрыта."
+
+const notInGameText = "Ты не участвуешь в этой игре."

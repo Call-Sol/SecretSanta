@@ -91,38 +91,42 @@ func (s *Postgres) SaveOffset(ctx context.Context, next int64) error {
 }
 
 // Session returns the wizard state. An expired session is deleted and reported as empty.
-func (s *Postgres) Session(ctx context.Context, userID int64, ttl time.Duration) (string, error) {
+func (s *Postgres) Session(ctx context.Context, userID int64, ttl time.Duration) (string, []byte, error) {
 	if ttl <= 0 {
 		ttl = 30 * time.Minute
 	}
 	var state string
+	var raw []byte
 	var updated time.Time
 	err := s.pool.QueryRow(ctx, `
-		SELECT state, updated_at FROM bot_sessions WHERE user_id = $1
-	`, userID).Scan(&state, &updated)
+		SELECT state, context, updated_at FROM bot_sessions WHERE user_id = $1
+	`, userID).Scan(&state, &raw, &updated)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return "", nil
+		return "", nil, nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("read session: %w", err)
+		return "", nil, fmt.Errorf("read session: %w", err)
 	}
 	if time.Since(updated) > ttl {
 		if err := s.ClearSession(ctx, userID); err != nil {
-			return "", err
+			return "", nil, err
 		}
-		return "", nil
+		return "", nil, nil
 	}
-	return state, nil
+	return state, raw, nil
 }
 
-// SaveSession remembers the wizard step for one person.
-func (s *Postgres) SaveSession(ctx context.Context, userID int64, state string) error {
+// SaveSession remembers the wizard step and its JSON context.
+func (s *Postgres) SaveSession(ctx context.Context, userID int64, state string, raw []byte) error {
+	if len(raw) == 0 {
+		raw = []byte(`{}`)
+	}
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO bot_sessions (user_id, state, context, updated_at)
-		VALUES ($1, $2, '{}'::jsonb, now())
+		VALUES ($1, $2, $3::jsonb, now())
 		ON CONFLICT (user_id) DO UPDATE
-		SET state = EXCLUDED.state, context = '{}'::jsonb, updated_at = now()
-	`, userID, state)
+		SET state = EXCLUDED.state, context = EXCLUDED.context, updated_at = now()
+	`, userID, state, string(raw))
 	if err != nil {
 		return fmt.Errorf("save session: %w", err)
 	}

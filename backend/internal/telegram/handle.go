@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alekseymakarkin/secret-santa/internal/games"
 	"github.com/alekseymakarkin/secret-santa/internal/groups"
 	"github.com/alekseymakarkin/secret-santa/internal/users"
 )
@@ -19,8 +20,8 @@ type Store interface {
 	Claim(ctx context.Context, updateID int64, id users.Identity, present, markDM bool) (claimed bool, userID int64, err error)
 	SaveOffset(ctx context.Context, next int64) error
 	Offset(ctx context.Context) (int64, error)
-	Session(ctx context.Context, userID int64, ttl time.Duration) (string, error)
-	SaveSession(ctx context.Context, userID int64, state string) error
+	Session(ctx context.Context, userID int64, ttl time.Duration) (string, []byte, error)
+	SaveSession(ctx context.Context, userID int64, state string, raw []byte) error
 	ClearSession(ctx context.Context, userID int64) error
 }
 
@@ -41,6 +42,7 @@ type Options struct {
 type Handler struct {
 	store    Store
 	groups   groups.Directory
+	games    games.Catalog
 	send     Sender
 	log      *slog.Logger
 	username string
@@ -48,7 +50,7 @@ type Handler struct {
 }
 
 // NewHandler builds the update handler.
-func NewHandler(store Store, directory groups.Directory, send Sender, log *slog.Logger, opts Options) *Handler {
+func NewHandler(store Store, directory groups.Directory, catalog games.Catalog, send Sender, log *slog.Logger, opts Options) *Handler {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -58,6 +60,7 @@ func NewHandler(store Store, directory groups.Directory, send Sender, log *slog.
 	return &Handler{
 		store:    store,
 		groups:   directory,
+		games:    catalog,
 		send:     send,
 		log:      log,
 		username: opts.BotUsername,
@@ -119,14 +122,18 @@ func (h *Handler) reply(ctx context.Context, upd Update, userID int64) error {
 		}
 		return h.send.SendMessage(ctx, upd.ChatID(), menuText, mainKeyboard())
 	}
-	state, err := h.store.Session(ctx, userID, h.ttl)
+	state, raw, err := h.store.Session(ctx, userID, h.ttl)
 	if err != nil {
 		return err
 	}
-	if state == "group_name" {
+	switch state {
+	case "group_name":
 		return h.createGroup(ctx, upd.ChatID(), userID, text)
+	case "game_name", "game_budget", "game_deadline", "game_exchange":
+		return h.gameWizard(ctx, upd.ChatID(), userID, state, raw, text)
+	default:
+		return h.send.SendMessage(ctx, upd.ChatID(), menuText, mainKeyboard())
 	}
-	return h.send.SendMessage(ctx, upd.ChatID(), menuText, mainKeyboard())
 }
 
 func (h *Handler) startScreen(ctx context.Context, payload string) (string, Keyboard) {
@@ -165,7 +172,7 @@ func (h *Handler) createGroup(ctx context.Context, chatID, userID int64, name st
 		Role:        "OWNER",
 		MemberCount: created.MemberCount,
 		Token:       created.Token,
-	}, deeplink(h.username, created.Token))
+	}, deeplink(h.username, created.Token), nil)
 	return h.send.SendMessage(ctx, chatID, text, keyboard)
 }
 
@@ -194,7 +201,7 @@ func (h *Handler) callbackScreen(ctx context.Context, data string, userID int64)
 	case "menu:help":
 		return helpText, mainKeyboard(), ""
 	case "grp:new":
-		if err := h.store.SaveSession(ctx, userID, "group_name"); err != nil {
+		if err := h.store.SaveSession(ctx, userID, "group_name", nil); err != nil {
 			h.log.Error("save session", "err", err.Error())
 			return createFailedText, mainKeyboard(), ""
 		}
@@ -207,6 +214,14 @@ func (h *Handler) callbackScreen(ctx context.Context, data string, userID int64)
 		return h.membersScreen(ctx, userID, args[0])
 	case "inv:accept":
 		return h.acceptScreen(ctx, userID, args[0])
+	case "game:create":
+		return h.startGame(ctx, userID, args[0])
+	case "game:open":
+		return h.gameScreen(ctx, userID, args[0])
+	case "game:confirm":
+		return h.decideGame(ctx, userID, args[0], games.Confirmed)
+	case "game:decline":
+		return h.decideGame(ctx, userID, args[0], games.Declined)
 	default:
 		return unavailableText, mainKeyboard(), unavailableText
 	}
@@ -231,7 +246,16 @@ func (h *Handler) openScreen(ctx context.Context, userID, groupID int64) (string
 		h.log.Error("open group", "group_id", groupID, "err", err.Error())
 		return unavailableText, mainKeyboard(), ""
 	}
-	text, keyboard := groupCardScreen(card, deeplink(h.username, card.Token))
+	current, ok, err := h.games.Current(ctx, userID, groupID)
+	if err != nil {
+		h.log.Error("current game", "group_id", groupID, "err", err.Error())
+		return unavailableText, mainKeyboard(), ""
+	}
+	var game *games.View
+	if ok {
+		game = &current
+	}
+	text, keyboard := groupCardScreen(card, deeplink(h.username, card.Token), game)
 	return text, keyboard, ""
 }
 

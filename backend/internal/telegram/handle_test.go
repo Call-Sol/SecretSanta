@@ -6,15 +6,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alekseymakarkin/secret-santa/internal/games"
 	"github.com/alekseymakarkin/secret-santa/internal/groups"
 	"github.com/alekseymakarkin/secret-santa/internal/users"
 )
 
 func newH(store *memStore, directory groups.Directory, send *memSend) *Handler {
+	return newHWithGames(store, directory, &memGames{}, send)
+}
+
+func newHWithGames(store *memStore, directory groups.Directory, catalog games.Catalog, send *memSend) *Handler {
 	if directory == nil {
 		directory = &memGroups{}
 	}
-	return NewHandler(store, directory, send, nil, Options{BotUsername: "secret_santa_bot", SessionTTL: time.Hour})
+	if catalog == nil {
+		catalog = &memGames{}
+	}
+	return NewHandler(store, directory, catalog, send, nil, Options{BotUsername: "secret_santa_bot", SessionTTL: time.Hour})
 }
 
 type memStore struct {
@@ -22,6 +30,7 @@ type memStore struct {
 	users    map[int64]users.Identity
 	offset   int64
 	sessions map[int64]string
+	contexts map[int64][]byte
 }
 
 func (m *memStore) Claim(_ context.Context, updateID int64, id users.Identity, present, markDM bool) (bool, int64, error) {
@@ -51,21 +60,59 @@ func (m *memStore) SaveOffset(_ context.Context, next int64) error {
 
 func (m *memStore) Offset(context.Context) (int64, error) { return m.offset, nil }
 
-func (m *memStore) Session(_ context.Context, userID int64, _ time.Duration) (string, error) {
-	return m.sessions[userID], nil
+func (m *memStore) Session(_ context.Context, userID int64, _ time.Duration) (string, []byte, error) {
+	return m.sessions[userID], m.contexts[userID], nil
 }
 
-func (m *memStore) SaveSession(_ context.Context, userID int64, state string) error {
+func (m *memStore) SaveSession(_ context.Context, userID int64, state string, raw []byte) error {
 	if m.sessions == nil {
 		m.sessions = map[int64]string{}
 	}
 	m.sessions[userID] = state
+	if m.contexts == nil {
+		m.contexts = map[int64][]byte{}
+	}
+	m.contexts[userID] = raw
 	return nil
 }
 
 func (m *memStore) ClearSession(_ context.Context, userID int64) error {
 	delete(m.sessions, userID)
+	delete(m.contexts, userID)
 	return nil
+}
+
+type memGames struct {
+	current games.View
+	has     bool
+	created games.Input
+	calls   int
+}
+
+func (m *memGames) Create(_ context.Context, _ int64, groupID int64, input games.Input) (games.View, error) {
+	m.calls++
+	m.created = input
+	budget := input.Budget
+	return games.View{
+		ID: 5, GroupID: groupID, Name: input.Name, Status: "REGISTRATION",
+		Budget: budget, Deadline: input.Deadline, Exchange: input.Exchange,
+		Participants: 1, Mine: games.Pending,
+	}, nil
+}
+
+func (m *memGames) Current(context.Context, int64, int64) (games.View, bool, error) {
+	return m.current, m.has, nil
+}
+
+func (m *memGames) Open(context.Context, int64, int64) (games.View, error) {
+	if !m.has {
+		return games.View{}, games.ErrNotInGame
+	}
+	return m.current, nil
+}
+
+func (m *memGames) Decide(context.Context, int64, int64, string) (games.View, error) {
+	return m.current, nil
 }
 
 type memGroups struct {
@@ -398,5 +445,74 @@ func TestAcceptInviteJoins(t *testing.T) {
 	}
 	if !strings.Contains(edited, "Ты присоединился к группе «Друзья»!") {
 		t.Fatalf("edited %q", edited)
+	}
+}
+
+func TestCreateGameWizard(t *testing.T) {
+	store := &memStore{}
+	send := &memSend{}
+	catalog := &memGames{}
+	directory := &memGroups{list: []groups.Summary{{ID: 3, Name: "Друзья", Role: "OWNER", MemberCount: 2}}}
+	h := newHWithGames(store, directory, catalog, send)
+	from := User{ID: 7, FirstName: "A"}
+	msg := &Message{MessageID: 3, Chat: Chat{ID: 7, Type: "private"}, From: &from}
+	private := func(updateID int64, text string) Update {
+		return Update{UpdateID: updateID, Message: &Message{From: &from, Chat: Chat{ID: 7, Type: "private"}, Text: text}}
+	}
+	steps := []Update{
+		{UpdateID: 20, CallbackQuery: &CallbackQuery{ID: "cb", From: from, Message: msg, Data: "game:create:3"}},
+		private(21, "  Тайный Санта 2026 "),
+		private(22, "2 000"),
+		private(23, "01.01.2030"),
+		private(24, "-"),
+	}
+	for _, upd := range steps {
+		if err := h.Handle(context.Background(), upd); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if catalog.calls != 1 || catalog.created.Name != "Тайный Санта 2026" || catalog.created.Budget == nil || *catalog.created.Budget != 2000 || catalog.created.Exchange != "" {
+		t.Fatalf("created %+v calls %d", catalog.created, catalog.calls)
+	}
+	day, _, err := games.ParseDay("01.01.2030")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if catalog.created.Deadline == nil || !catalog.created.Deadline.Equal(games.EndOfDay(day)) {
+		t.Fatalf("deadline %v", catalog.created.Deadline)
+	}
+	if store.sessions[7] != "" {
+		t.Fatal("session left open")
+	}
+	last := send.msgs[len(send.msgs)-1].text
+	for _, part := range []string{"Игра создана.", "Регистрация", "2 000 ₽", "Регистрация до: 01.01.2030", "Ты ещё не подтвердил участие."} {
+		if !strings.Contains(last, part) {
+			t.Fatalf("card %q missing %s", last, part)
+		}
+	}
+}
+
+func TestMemberCannotCreateGame(t *testing.T) {
+	store := &memStore{}
+	send := &memSend{}
+	directory := &memGroups{list: []groups.Summary{{ID: 3, Name: "Друзья", Role: "MEMBER", MemberCount: 2}}}
+	h := newH(store, directory, send)
+	from := User{ID: 7, FirstName: "A"}
+	msg := &Message{MessageID: 3, Chat: Chat{ID: 7, Type: "private"}, From: &from}
+	err := h.Handle(context.Background(), Update{
+		UpdateID:      30,
+		CallbackQuery: &CallbackQuery{ID: "cb", From: from, Message: msg, Data: "game:create:3"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var edited string
+	for _, m := range send.msgs {
+		if m.edit {
+			edited = m.text
+		}
+	}
+	if edited != forbiddenText || store.sessions[7] != "" {
+		t.Fatalf("edited %q session %q", edited, store.sessions[7])
 	}
 }
