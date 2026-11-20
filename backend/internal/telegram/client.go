@@ -144,6 +144,31 @@ func (c *Client) SendMessage(ctx context.Context, chatID int64, text string, key
 	}, nil, false)
 }
 
+// SendMessageHTML sends text that may contain Telegram HTML markup.
+func (c *Client) SendMessageHTML(ctx context.Context, chatID int64, text string, keyboard Keyboard) error {
+	return c.call(ctx, "sendMessage", map[string]any{
+		"chat_id":      chatID,
+		"text":         text,
+		"parse_mode":   "HTML",
+		"reply_markup": keyboardBody(keyboard),
+	}, nil, false)
+}
+
+// APIError is a rejected Bot API call. Description is not safe to log when the request carried a secret.
+type APIError struct {
+	Method      string
+	Status      int
+	Description string
+	RetryAfter  time.Duration
+}
+
+func (e *APIError) Error() string {
+	if e.Description == "" {
+		return fmt.Sprintf("telegram %s: status %d", e.Method, e.Status)
+	}
+	return fmt.Sprintf("telegram %s: %s", e.Method, e.Description)
+}
+
 // EditMessageText replaces a menu message in place.
 func (c *Client) EditMessageText(ctx context.Context, chatID int64, messageID int, text string, keyboard Keyboard) error {
 	return c.call(ctx, "editMessageText", map[string]any{
@@ -213,18 +238,28 @@ func (c *Client) call(ctx context.Context, method string, payload any, dest any,
 		return fmt.Errorf("telegram %s: %s", method, redactToken(c.token, err.Error()))
 	}
 	var envelope struct {
-		OK          bool            `json:"ok"`
-		Description string          `json:"description"`
-		Result      json.RawMessage `json:"result"`
+		OK          bool   `json:"ok"`
+		ErrorCode   int    `json:"error_code"`
+		Description string `json:"description"`
+		Parameters  struct {
+			RetryAfter int `json:"retry_after"`
+		} `json:"parameters"`
+		Result json.RawMessage `json:"result"`
 	}
 	if err := json.Unmarshal(raw, &envelope); err != nil {
-		return fmt.Errorf("telegram %s: status %d", method, resp.StatusCode)
+		return &APIError{Method: method, Status: resp.StatusCode}
 	}
 	if !envelope.OK {
-		if envelope.Description == "" {
-			return fmt.Errorf("telegram %s: status %d", method, resp.StatusCode)
+		status := envelope.ErrorCode
+		if status == 0 {
+			status = resp.StatusCode
 		}
-		return fmt.Errorf("telegram %s: %s", method, envelope.Description)
+		return &APIError{
+			Method:      method,
+			Status:      status,
+			Description: envelope.Description,
+			RetryAfter:  time.Duration(envelope.Parameters.RetryAfter) * time.Second,
+		}
 	}
 	if dest != nil && len(envelope.Result) > 0 {
 		if err := json.Unmarshal(envelope.Result, dest); err != nil {

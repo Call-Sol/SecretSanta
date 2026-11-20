@@ -29,6 +29,7 @@ const viewSelect = `
 	         WHERE cp.game_id = g.id AND cp.status = 'CONFIRMED'),
 	       (SELECT count(*) FROM game_participants ap WHERE ap.game_id = g.id),
 	       COALESCE(p.status, ''),
+	       COALESCE(p.assignment_state, ''),
 	       m.role
 	FROM games g
 	JOIN group_members m ON m.group_id = g.group_id AND m.user_id = $1 AND m.status = 'ACTIVE'
@@ -196,6 +197,33 @@ func (s *Postgres) Decide(ctx context.Context, userID, gameID int64, status stri
 	return s.Open(ctx, userID, gameID)
 }
 
+// List returns every game in the groups where this person is an active member.
+func (s *Postgres) List(ctx context.Context, userID int64) ([]Summary, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT g.id, g.name, gr.name, g.status
+		FROM games g
+		JOIN groups gr ON gr.id = g.group_id AND gr.status = 'ACTIVE'
+		JOIN group_members m ON m.group_id = g.group_id AND m.user_id = $1 AND m.status = 'ACTIVE'
+		ORDER BY g.id DESC
+	`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list games: %w", err)
+	}
+	defer rows.Close()
+	var out []Summary
+	for rows.Next() {
+		var item Summary
+		if err := rows.Scan(&item.ID, &item.Name, &item.GroupName, &item.Status); err != nil {
+			return nil, fmt.Errorf("list games: %w", err)
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list games: %w", err)
+	}
+	return out, nil
+}
+
 // People lists participants for the owner or an admin, grouped later by status.
 func (s *Postgres) People(ctx context.Context, userID, gameID int64) ([]Participant, error) {
 	view, err := s.Open(ctx, userID, gameID)
@@ -284,7 +312,7 @@ func scanView(row pgx.Row) (View, error) {
 	var exchange *string
 	err := row.Scan(
 		&view.ID, &view.GroupID, &view.Name, &view.Status, &description, &deadline, &exchange,
-		&view.Confirmed, &view.Participants, &view.Mine, &view.Role,
+		&view.Confirmed, &view.Participants, &view.Mine, &view.Assignment, &view.Role,
 	)
 	if err != nil {
 		return View{}, err

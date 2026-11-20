@@ -8,8 +8,10 @@ import (
 	"syscall"
 
 	"github.com/alekseymakarkin/secret-santa/internal/config"
+	"github.com/alekseymakarkin/secret-santa/internal/notifications"
 	"github.com/alekseymakarkin/secret-santa/internal/platform/logger"
 	"github.com/alekseymakarkin/secret-santa/internal/platform/postgres"
+	"github.com/alekseymakarkin/secret-santa/internal/telegram"
 )
 
 func main() {
@@ -35,8 +37,6 @@ func run(ctx context.Context) error {
 	}
 	defer pool.Close()
 
-	log.Info("database ready")
-	log.Info("outbox delivery is not started in this slice")
-	<-ctx.Done()
-	return nil
+	log.Info("outbox delivery started")
+	return notifications.Run(ctx, pool, notifications.ClientSender{Client: telegram.NewClient(cfg.TelegramBotToken)}, log, cfg.OutboxPollInterval, cfg.OutboxBatchSize)
 }

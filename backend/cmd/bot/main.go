@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/alekseymakarkin/secret-santa/internal/config"
+	"github.com/alekseymakarkin/secret-santa/internal/draws"
 	"github.com/alekseymakarkin/secret-santa/internal/games"
 	"github.com/alekseymakarkin/secret-santa/internal/groups"
 	"github.com/alekseymakarkin/secret-santa/internal/platform/logger"
@@ -47,7 +48,7 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("telegram mode %s is not implemented", cfg.TelegramMode)
 	}
 	log.Info("telegram polling")
-	return telegram.Poll(ctx, telegram.NewClient(cfg.TelegramBotToken), telegram.NewPostgres(pool), groups.NewPostgres(pool), games.NewPostgres(pool), log, telegram.Options{
+	return telegram.Poll(ctx, telegram.NewClient(cfg.TelegramBotToken), telegram.NewPostgres(pool), groups.NewPostgres(pool), games.NewPostgres(pool), draws.NewPostgres(pool), log, telegram.Options{
 		BotUsername: cfg.TelegramBotUsername,
 		SessionTTL:  cfg.SessionTTL,
 	})

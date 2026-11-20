@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alekseymakarkin/secret-santa/internal/draws"
 	"github.com/alekseymakarkin/secret-santa/internal/games"
 	"github.com/alekseymakarkin/secret-santa/internal/groups"
 	"github.com/alekseymakarkin/secret-santa/internal/users"
@@ -22,7 +23,20 @@ func newHWithGames(store *memStore, directory groups.Directory, catalog games.Ca
 	if catalog == nil {
 		catalog = &memGames{}
 	}
-	return NewHandler(store, directory, catalog, send, nil, Options{BotUsername: "secret_santa_bot", SessionTTL: time.Hour})
+	return NewHandler(store, directory, catalog, &memDraws{}, send, nil, Options{BotUsername: "secret_santa_bot", SessionTTL: time.Hour})
+}
+
+func newHWithDraws(store *memStore, directory groups.Directory, catalog games.Catalog, runner draws.Runner, send *memSend) *Handler {
+	if directory == nil {
+		directory = &memGroups{}
+	}
+	if catalog == nil {
+		catalog = &memGames{}
+	}
+	if runner == nil {
+		runner = &memDraws{}
+	}
+	return NewHandler(store, directory, catalog, runner, send, nil, Options{BotUsername: "secret_santa_bot", SessionTTL: time.Hour})
 }
 
 type memStore struct {
@@ -87,6 +101,7 @@ type memGames struct {
 	has       bool
 	created   games.Input
 	calls     int
+	list      []games.Summary
 	people    []games.Participant
 	peopleErr error
 }
@@ -105,6 +120,10 @@ func (m *memGames) Current(context.Context, int64, int64) (games.View, bool, err
 	return m.current, m.has, nil
 }
 
+func (m *memGames) List(context.Context, int64) ([]games.Summary, error) {
+	return m.list, nil
+}
+
 func (m *memGames) Open(context.Context, int64, int64) (games.View, error) {
 	if !m.has {
 		return games.View{}, games.ErrNotInGame
@@ -114,6 +133,24 @@ func (m *memGames) Open(context.Context, int64, int64) (games.View, error) {
 
 func (m *memGames) Decide(context.Context, int64, int64, string) (games.View, error) {
 	return m.current, nil
+}
+
+type memDraws struct {
+	err  error
+	runs int
+	mine draws.Mine
+}
+
+func (m *memDraws) Run(context.Context, int64, int64) error {
+	m.runs++
+	return m.err
+}
+
+func (m *memDraws) ViewMine(context.Context, int64, int64) (draws.Mine, error) {
+	if m.err != nil {
+		return draws.Mine{}, m.err
+	}
+	return m.mine, nil
 }
 
 func (m *memGames) People(context.Context, int64, int64) ([]games.Participant, error) {
@@ -234,7 +271,7 @@ func TestStartStoresUserAndShowsMenu(t *testing.T) {
 	if got.chat != 42 || got.text != menuText {
 		t.Fatalf("message %+v", got)
 	}
-	want := []string{"Мои группы|grp:list", "Создать группу|grp:new", "Помощь|menu:help"}
+	want := []string{"Мои группы|grp:list", "Мои игры|game:list", "Создать группу|grp:new", "Помощь|menu:help"}
 	if strings.Join(got.data, ",") != strings.Join(want, ",") {
 		t.Fatalf("buttons %v", got.data)
 	}
@@ -579,6 +616,35 @@ func TestOwnerSeesParticipantsByStatus(t *testing.T) {
 	}
 }
 
+func TestMyGamesOpensAGame(t *testing.T) {
+	send := &memSend{}
+	catalog := &memGames{list: []games.Summary{{
+		ID: 5, Name: "Тайный Санта 2026", GroupName: "Друзья", Status: "REGISTRATION",
+	}}}
+	h := newHWithGames(&memStore{}, &memGroups{}, catalog, send)
+	from := User{ID: 7, FirstName: "A"}
+	msg := &Message{MessageID: 3, Chat: Chat{ID: 7, Type: "private"}, From: &from}
+	if err := h.Handle(context.Background(), Update{
+		UpdateID: 42, CallbackQuery: &CallbackQuery{ID: "cb", From: from, Message: msg, Data: "game:list"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var edited string
+	var data []string
+	for _, m := range send.msgs {
+		if m.edit {
+			edited = m.text
+			data = m.data
+		}
+	}
+	if !strings.Contains(edited, "Твои игры:") || !strings.Contains(edited, "Тайный Санта 2026 — Друзья") || !strings.Contains(edited, "Регистрация") {
+		t.Fatalf("edited %q", edited)
+	}
+	if strings.Join(data, ",") != "Тайный Санта 2026|game:open:5,В меню|menu:home" {
+		t.Fatalf("buttons %v", data)
+	}
+}
+
 func TestMemberCannotListParticipants(t *testing.T) {
 	send := &memSend{}
 	catalog := &memGames{has: true, current: games.View{ID: 5, Role: "MEMBER"}, peopleErr: games.ErrForbidden}
@@ -599,6 +665,69 @@ func TestMemberCannotListParticipants(t *testing.T) {
 		}
 	}
 	if edited != forbiddenText {
+		t.Fatalf("edited %q", edited)
+	}
+}
+
+func TestDrawAsksForConfirmationThenRuns(t *testing.T) {
+	send := &memSend{}
+	catalog := &memGames{has: true, current: games.View{
+		ID: 5, GroupID: 3, Name: "Тайный Санта 2026", Role: "OWNER", Status: "REGISTRATION",
+	}}
+	runner := &memDraws{}
+	h := newHWithDraws(&memStore{}, &memGroups{}, catalog, runner, send)
+	from := User{ID: 7, FirstName: "A"}
+	msg := &Message{MessageID: 4, Chat: Chat{ID: 7, Type: "private"}, From: &from}
+	if err := h.Handle(context.Background(), Update{
+		UpdateID: 50, CallbackQuery: &CallbackQuery{ID: "cb1", From: from, Message: msg, Data: "game:draw:5"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if runner.runs != 0 {
+		t.Fatal("warning click started the draw")
+	}
+	catalog.current.Status = "DRAWN"
+	catalog.current.Assignment = "ASSIGNED"
+	if err := h.Handle(context.Background(), Update{
+		UpdateID: 51, CallbackQuery: &CallbackQuery{ID: "cb2", From: from, Message: msg, Data: "game:draw_ok:5"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if runner.runs != 1 {
+		t.Fatalf("runs %d", runner.runs)
+	}
+	var edited []string
+	for _, m := range send.msgs {
+		if m.edit {
+			edited = append(edited, m.text)
+		}
+	}
+	if len(edited) != 2 || !strings.Contains(edited[0], "Начать жеребьёвку") || !strings.Contains(edited[1], drawDoneText) {
+		t.Fatalf("edits %v", edited)
+	}
+	if strings.Contains(edited[1], "даришь подарок") {
+		t.Fatalf("draw result leaked a receiver: %q", edited[1])
+	}
+}
+
+func TestMineShowsOnlyTheCallerReceiver(t *testing.T) {
+	send := &memSend{}
+	runner := &memDraws{mine: draws.Mine{GameID: 5, GameName: "Игра", ReceiverName: "Борис"}}
+	h := newHWithDraws(&memStore{}, &memGroups{}, &memGames{}, runner, send)
+	from := User{ID: 7, FirstName: "A"}
+	msg := &Message{MessageID: 4, Chat: Chat{ID: 7, Type: "private"}, From: &from}
+	if err := h.Handle(context.Background(), Update{
+		UpdateID: 52, CallbackQuery: &CallbackQuery{ID: "cb", From: from, Message: msg, Data: "game:mine:5"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var edited string
+	for _, m := range send.msgs {
+		if m.edit {
+			edited = m.text
+		}
+	}
+	if !strings.Contains(edited, "<b>Борис</b>") || strings.Contains(edited, "Анна") {
 		t.Fatalf("edited %q", edited)
 	}
 }

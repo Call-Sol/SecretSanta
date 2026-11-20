@@ -172,6 +172,19 @@ func TestCreateGameKeepsMembersPending(t *testing.T) {
 	if err != nil || len(adminRoster) != 2 {
 		t.Fatalf("admin roster %+v err %v", adminRoster, err)
 	}
+
+	ownerGames, err := catalog.List(ctx, owner)
+	if err != nil || len(ownerGames) != 2 || ownerGames[0].Name != "Офис" || ownerGames[0].GroupName != "Коллеги" || ownerGames[1].Name != "Тайный Санта 2026" || ownerGames[1].GroupName != "Друзья" {
+		t.Fatalf("owner games %+v err %v", ownerGames, err)
+	}
+	adminGames, err := catalog.List(ctx, admin)
+	if err != nil || len(adminGames) != 1 || adminGames[0].ID != adminGame.ID || adminGames[0].Status != "REGISTRATION" {
+		t.Fatalf("admin games %+v err %v", adminGames, err)
+	}
+	lateGames, err := catalog.List(ctx, fourth)
+	if err != nil || len(lateGames) != 1 || lateGames[0].ID != view.ID {
+		t.Fatalf("late member games %+v err %v", lateGames, err)
+	}
 }
 
 func assertStatus(t *testing.T, ctx context.Context, pool *pgxpool.Pool, gameID, userID int64, status string) {

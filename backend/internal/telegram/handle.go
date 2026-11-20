@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alekseymakarkin/secret-santa/internal/draws"
 	"github.com/alekseymakarkin/secret-santa/internal/games"
 	"github.com/alekseymakarkin/secret-santa/internal/groups"
 	"github.com/alekseymakarkin/secret-santa/internal/users"
@@ -43,6 +44,7 @@ type Handler struct {
 	store    Store
 	groups   groups.Directory
 	games    games.Catalog
+	draws    draws.Runner
 	send     Sender
 	log      *slog.Logger
 	username string
@@ -50,7 +52,7 @@ type Handler struct {
 }
 
 // NewHandler builds the update handler.
-func NewHandler(store Store, directory groups.Directory, catalog games.Catalog, send Sender, log *slog.Logger, opts Options) *Handler {
+func NewHandler(store Store, directory groups.Directory, catalog games.Catalog, runner draws.Runner, send Sender, log *slog.Logger, opts Options) *Handler {
 	if log == nil {
 		log = slog.Default()
 	}
@@ -61,6 +63,7 @@ func NewHandler(store Store, directory groups.Directory, catalog games.Catalog, 
 		store:    store,
 		groups:   directory,
 		games:    catalog,
+		draws:    runner,
 		send:     send,
 		log:      log,
 		username: opts.BotUsername,
@@ -208,6 +211,8 @@ func (h *Handler) callbackScreen(ctx context.Context, data string, userID int64)
 		return askGroupNameText, Keyboard{}, ""
 	case "grp:list":
 		return h.listScreen(ctx, userID)
+	case "game:list":
+		return h.gamesScreen(ctx, userID)
 	case "grp:open":
 		return h.openScreen(ctx, userID, args[0])
 	case "grp:members":
@@ -224,6 +229,12 @@ func (h *Handler) callbackScreen(ctx context.Context, data string, userID int64)
 		return h.decideGame(ctx, userID, args[0], games.Declined)
 	case "game:people":
 		return h.peopleScreen(ctx, userID, args[0])
+	case "game:draw":
+		return h.drawScreen(ctx, userID, args[0])
+	case "game:draw_ok":
+		return h.drawConfirm(ctx, userID, args[0])
+	case "game:mine":
+		return h.mineScreen(ctx, userID, args[0])
 	default:
 		return unavailableText, mainKeyboard(), unavailableText
 	}
@@ -236,6 +247,16 @@ func (h *Handler) listScreen(ctx context.Context, userID int64) (string, Keyboar
 		return noGroupsText, mainKeyboard(), ""
 	}
 	text, keyboard := groupListScreen(items)
+	return text, keyboard, ""
+}
+
+func (h *Handler) gamesScreen(ctx context.Context, userID int64) (string, Keyboard, string) {
+	items, err := h.games.List(ctx, userID)
+	if err != nil {
+		h.log.Error("list games", "err", err.Error())
+		return noGamesText, mainKeyboard(), ""
+	}
+	text, keyboard := gameListScreen(items)
 	return text, keyboard, ""
 }
 

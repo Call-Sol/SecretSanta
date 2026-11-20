@@ -8,6 +8,23 @@ import (
 	"github.com/alekseymakarkin/secret-santa/internal/games"
 )
 
+func gameListScreen(items []games.Summary) (string, Keyboard) {
+	if len(items) == 0 {
+		return noGamesText, Keyboard{Rows: [][]Button{
+			{{Text: "В меню", Data: "menu:home"}},
+		}}
+	}
+	rows := make([][]Button, 0, len(items)+1)
+	var b strings.Builder
+	b.WriteString("Твои игры:")
+	for _, item := range items {
+		fmt.Fprintf(&b, "\n• %s — %s\n  %s", item.Name, item.GroupName, gameStatusLabel(item.Status))
+		rows = append(rows, []Button{{Text: buttonLabel(item.Name), Data: fmt.Sprintf("game:open:%d", item.ID)}})
+	}
+	rows = append(rows, []Button{{Text: "В меню", Data: "menu:home"}})
+	return b.String(), Keyboard{Rows: rows}
+}
+
 func gameCardScreen(view games.View, intro string) (string, Keyboard) {
 	var b strings.Builder
 	if intro != "" {
@@ -25,7 +42,7 @@ func gameCardScreen(view games.View, intro string) (string, Keyboard) {
 	case games.Declined:
 		b.WriteString("\n\nТы отказался от участия.")
 	}
-	rows := make([][]Button, 0, 4)
+	rows := make([][]Button, 0, 5)
 	if registrationOpen(view) && view.Mine != "" {
 		if view.Mine != games.Confirmed {
 			rows = append(rows, []Button{{Text: "Подтвердить участие", Data: fmt.Sprintf("game:confirm:%d", view.ID)}})
@@ -34,8 +51,14 @@ func gameCardScreen(view games.View, intro string) (string, Keyboard) {
 			rows = append(rows, []Button{{Text: "Отказаться", Data: fmt.Sprintf("game:decline:%d", view.ID)}})
 		}
 	}
+	if (view.Role == "OWNER" || view.Role == "ADMIN") && (view.Status == "REGISTRATION" || view.Status == "LOCKED") {
+		rows = append(rows, []Button{{Text: "Начать жеребьёвку", Data: fmt.Sprintf("game:draw:%d", view.ID)}})
+	}
 	if view.Role == "OWNER" || view.Role == "ADMIN" {
 		rows = append(rows, []Button{{Text: "Список участников", Data: fmt.Sprintf("game:people:%d", view.ID)}})
+	}
+	if view.Assignment == "ASSIGNED" {
+		rows = append(rows, []Button{{Text: "Посмотреть получателя", Data: fmt.Sprintf("game:mine:%d", view.ID)}})
 	}
 	rows = append(rows, []Button{{Text: "К группе", Data: fmt.Sprintf("grp:open:%d", view.GroupID)}})
 	return b.String(), Keyboard{Rows: rows}

@@ -31,6 +31,21 @@ func TestPeopleScreenKeepsWaitingOutOfConfirmed(t *testing.T) {
 	}
 }
 
+func TestOrganizerCanStartTheDraw(t *testing.T) {
+	_, keyboard := gameCardScreen(games.View{ID: 5, GroupID: 3, Role: "OWNER", Status: "REGISTRATION"}, "")
+	if !hasData(keyboard, "game:draw:5") {
+		t.Fatal("owner cannot start the draw")
+	}
+	_, member := gameCardScreen(games.View{ID: 5, GroupID: 3, Role: "MEMBER", Status: "REGISTRATION"}, "")
+	if hasData(member, "game:draw:5") {
+		t.Fatal("member can start the draw")
+	}
+	_, drawn := gameCardScreen(games.View{ID: 5, GroupID: 3, Role: "MEMBER", Status: "DRAWN", Assignment: "ASSIGNED"}, "")
+	if hasData(drawn, "game:draw:5") || !hasData(drawn, "game:mine:5") {
+		t.Fatal("drawn card buttons")
+	}
+}
+
 func hasData(keyboard Keyboard, data string) bool {
 	for _, row := range keyboard.Rows {
 		for _, button := range row {

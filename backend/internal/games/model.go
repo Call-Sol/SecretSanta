@@ -34,6 +34,7 @@ type View struct {
 	Confirmed    int
 	Participants int
 	Mine         string
+	Assignment   string
 	Role         string
 }
 
@@ -44,11 +45,20 @@ type Participant struct {
 	AssignmentState string
 }
 
+// Summary is one row in a member's game list.
+type Summary struct {
+	ID        int64
+	Name      string
+	GroupName string
+	Status    string
+}
+
 // Catalog is how the bot creates a game and records a member's answer.
 type Catalog interface {
 	Create(ctx context.Context, userID, groupID int64, input Input) (View, error)
 	Current(ctx context.Context, userID, groupID int64) (View, bool, error)
 	Open(ctx context.Context, userID, gameID int64) (View, error)
+	List(ctx context.Context, userID int64) ([]Summary, error)
 	Decide(ctx context.Context, userID, gameID int64, status string) (View, error)
 	People(ctx context.Context, userID, gameID int64) ([]Participant, error)
 }
