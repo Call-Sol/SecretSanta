@@ -4,14 +4,16 @@ import (
 	"context"
 	"log/slog"
 	"time"
+
+	"github.com/alekseymakarkin/secret-santa/internal/groups"
 )
 
 // Poll reads private updates and answers /start with the main menu.
-func Poll(ctx context.Context, client *Client, store Store, log *slog.Logger) error {
+func Poll(ctx context.Context, client *Client, store Store, directory groups.Directory, log *slog.Logger, opts Options) error {
 	if log == nil {
 		log = slog.Default()
 	}
-	handler := NewHandler(store, client, log)
+	handler := NewHandler(store, directory, client, log, opts)
 	offset, err := store.Offset(ctx)
 	if err != nil {
 		return err

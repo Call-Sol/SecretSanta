@@ -4,15 +4,24 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/alekseymakarkin/secret-santa/internal/groups"
 	"github.com/alekseymakarkin/secret-santa/internal/users"
 )
 
+func newH(store *memStore, directory groups.Directory, send *memSend) *Handler {
+	if directory == nil {
+		directory = &memGroups{}
+	}
+	return NewHandler(store, directory, send, nil, Options{BotUsername: "secret_santa_bot", SessionTTL: time.Hour})
+}
+
 type memStore struct {
-	claimed map[int64]bool
-	users   map[int64]users.Identity
-	groups  []string
-	offset  int64
+	claimed  map[int64]bool
+	users    map[int64]users.Identity
+	offset   int64
+	sessions map[int64]string
 }
 
 func (m *memStore) Claim(_ context.Context, updateID int64, id users.Identity, present, markDM bool) (bool, int64, error) {
@@ -42,8 +51,70 @@ func (m *memStore) SaveOffset(_ context.Context, next int64) error {
 
 func (m *memStore) Offset(context.Context) (int64, error) { return m.offset, nil }
 
-func (m *memStore) ActiveGroupNames(context.Context, int64) ([]string, error) {
-	return m.groups, nil
+func (m *memStore) Session(_ context.Context, userID int64, _ time.Duration) (string, error) {
+	return m.sessions[userID], nil
+}
+
+func (m *memStore) SaveSession(_ context.Context, userID int64, state string) error {
+	if m.sessions == nil {
+		m.sessions = map[int64]string{}
+	}
+	m.sessions[userID] = state
+	return nil
+}
+
+func (m *memStore) ClearSession(_ context.Context, userID int64) error {
+	delete(m.sessions, userID)
+	return nil
+}
+
+type memGroups struct {
+	list       []groups.Summary
+	created    []string
+	preview    groups.Preview
+	previewErr error
+	joins      int
+	joined     bool
+}
+
+func (m *memGroups) Create(_ context.Context, _ int64, name string) (groups.Created, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return groups.Created{}, groups.ErrInvalidName
+	}
+	m.created = append(m.created, name)
+	return groups.Created{ID: int64(len(m.created)), Name: name, Token: "aaaaaaaaaaaaaaaaaaaaaa", MemberCount: 1}, nil
+}
+
+func (m *memGroups) List(context.Context, int64) ([]groups.Summary, error) {
+	return m.list, nil
+}
+
+func (m *memGroups) Open(context.Context, int64, int64) (groups.Card, error) {
+	if len(m.list) == 0 {
+		return groups.Card{}, groups.ErrNotMember
+	}
+	item := m.list[0]
+	return groups.Card{ID: item.ID, Name: item.Name, Role: item.Role, MemberCount: item.MemberCount, Token: "aaaaaaaaaaaaaaaaaaaaaa"}, nil
+}
+
+func (m *memGroups) Members(context.Context, int64, int64) ([]groups.Person, error) {
+	return []groups.Person{{DisplayName: "Анна", Role: "OWNER"}}, nil
+}
+
+func (m *memGroups) Preview(context.Context, string) (groups.Preview, error) {
+	if m.previewErr != nil {
+		return groups.Preview{}, m.previewErr
+	}
+	if m.preview.InviteID == 0 {
+		return groups.Preview{}, groups.ErrInviteInvalid
+	}
+	return m.preview, nil
+}
+
+func (m *memGroups) Accept(context.Context, int64, int64) (groups.Join, error) {
+	m.joins++
+	return groups.Join{GroupID: m.preview.GroupID, GroupName: m.preview.GroupName, MemberCount: 2, AlreadyMember: m.joined}, nil
 }
 
 type sent struct {
@@ -86,7 +157,7 @@ func datas(keyboard Keyboard) []string {
 func TestStartStoresUserAndShowsMenu(t *testing.T) {
 	store := &memStore{}
 	send := &memSend{}
-	h := NewHandler(store, send, nil)
+	h := newH(store, nil, send)
 	upd := Update{
 		UpdateID: 10,
 		Message: &Message{
@@ -120,7 +191,7 @@ func TestStartStoresUserAndShowsMenu(t *testing.T) {
 func TestStartAtBotNameAndHelp(t *testing.T) {
 	store := &memStore{}
 	send := &memSend{}
-	h := NewHandler(store, send, nil)
+	h := newH(store, nil, send)
 	err := h.Handle(context.Background(), Update{
 		UpdateID: 1,
 		Message: &Message{
@@ -150,7 +221,7 @@ func TestStartAtBotNameAndHelp(t *testing.T) {
 
 func TestUnknownStartPayloadSaysLinkIsInvalid(t *testing.T) {
 	send := &memSend{}
-	h := NewHandler(&memStore{}, send, nil)
+	h := newH(&memStore{}, nil, send)
 	err := h.Handle(context.Background(), Update{
 		UpdateID: 3,
 		Message: &Message{
@@ -169,7 +240,8 @@ func TestUnknownStartPayloadSaysLinkIsInvalid(t *testing.T) {
 
 func TestJoinPayloadDoesNotJoin(t *testing.T) {
 	send := &memSend{}
-	h := NewHandler(&memStore{}, send, nil)
+	directory := &memGroups{preview: groups.Preview{InviteID: 4, GroupID: 9, GroupName: "Друзья"}}
+	h := newH(&memStore{}, directory, send)
 	err := h.Handle(context.Background(), Update{
 		UpdateID: 4,
 		Message: &Message{
@@ -181,15 +253,18 @@ func TestJoinPayloadDoesNotJoin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if send.msgs[0].text != menuText {
-		t.Fatalf("text %q", send.msgs[0].text)
+	if !strings.Contains(send.msgs[0].text, "Друзья") || !strings.Contains(strings.Join(send.msgs[0].data, ","), "Вступить|inv:accept:4") {
+		t.Fatalf("preview %+v", send.msgs[0])
+	}
+	if directory.joins != 0 {
+		t.Fatal("preview joined")
 	}
 }
 
 func TestGroupChatIsIgnored(t *testing.T) {
 	store := &memStore{}
 	send := &memSend{}
-	h := NewHandler(store, send, nil)
+	h := newH(store, nil, send)
 	err := h.Handle(context.Background(), Update{
 		UpdateID: 5,
 		Message: &Message{
@@ -210,9 +285,10 @@ func TestGroupChatIsIgnored(t *testing.T) {
 }
 
 func TestMyGroupsAndCreateButtons(t *testing.T) {
-	store := &memStore{groups: []string{"Друзья"}}
+	store := &memStore{}
 	send := &memSend{}
-	h := NewHandler(store, send, nil)
+	directory := &memGroups{list: []groups.Summary{{ID: 3, Name: "Друзья", Role: "OWNER", MemberCount: 1}}}
+	h := newH(store, directory, send)
 	from := User{ID: 7, FirstName: "A"}
 	msg := &Message{MessageID: 3, Chat: Chat{ID: 7, Type: "private"}, From: &from}
 	if err := h.Handle(context.Background(), Update{
@@ -243,10 +319,84 @@ func TestMyGroupsAndCreateButtons(t *testing.T) {
 			toasts = append(toasts, m.toast)
 		}
 	}
-	if len(edited) != 3 || !strings.Contains(edited[0], "Друзья") || edited[1] != createLaterText || edited[2] != unavailableText {
+	if len(edited) != 3 || !strings.Contains(edited[0], "Друзья") || edited[1] != askGroupNameText || edited[2] != unavailableText {
 		t.Fatalf("edits %v", edited)
 	}
 	if len(toasts) != 3 || toasts[2] != unavailableText {
 		t.Fatalf("toasts %v", toasts)
+	}
+}
+
+func TestCreateGroupFromName(t *testing.T) {
+	store := &memStore{sessions: map[int64]string{1: "group_name"}}
+	send := &memSend{}
+	directory := &memGroups{}
+	h := newH(store, directory, send)
+	err := h.Handle(context.Background(), Update{
+		UpdateID: 11,
+		Message: &Message{
+			From: &User{ID: 1, FirstName: "A"},
+			Chat: Chat{ID: 1, Type: "private"},
+			Text: "  Друзья ",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(directory.created) != 1 || directory.created[0] != "Друзья" {
+		t.Fatalf("created %v", directory.created)
+	}
+	if store.sessions[1] != "" {
+		t.Fatal("session was not cleared")
+	}
+	if !strings.Contains(send.msgs[0].text, "https://t.me/secret_santa_bot?start=join_aaaaaaaaaaaaaaaaaaaaaa") || !strings.Contains(send.msgs[0].text, "владелец") {
+		t.Fatalf("card %q", send.msgs[0].text)
+	}
+}
+
+func TestCancelClearsGroupWizard(t *testing.T) {
+	store := &memStore{sessions: map[int64]string{1: "group_name"}}
+	directory := &memGroups{}
+	h := newH(store, directory, &memSend{})
+	err := h.Handle(context.Background(), Update{
+		UpdateID: 12,
+		Message: &Message{
+			From: &User{ID: 1, FirstName: "A"},
+			Chat: Chat{ID: 1, Type: "private"},
+			Text: "Отмена",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.sessions[1] != "" || len(directory.created) != 0 {
+		t.Fatalf("session %q created %v", store.sessions[1], directory.created)
+	}
+}
+
+func TestAcceptInviteJoins(t *testing.T) {
+	directory := &memGroups{preview: groups.Preview{InviteID: 4, GroupID: 9, GroupName: "Друзья"}}
+	send := &memSend{}
+	h := newH(&memStore{}, directory, send)
+	from := User{ID: 2, FirstName: "Борис"}
+	msg := &Message{MessageID: 8, Chat: Chat{ID: 2, Type: "private"}, From: &from}
+	err := h.Handle(context.Background(), Update{
+		UpdateID:      13,
+		CallbackQuery: &CallbackQuery{ID: "cb", From: from, Message: msg, Data: "inv:accept:4"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if directory.joins != 1 {
+		t.Fatalf("joins %d", directory.joins)
+	}
+	var edited string
+	for _, m := range send.msgs {
+		if m.edit {
+			edited = m.text
+		}
+	}
+	if !strings.Contains(edited, "Ты присоединился к группе «Друзья»!") {
+		t.Fatalf("edited %q", edited)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/alekseymakarkin/secret-santa/internal/platform/postgres"
 	"github.com/alekseymakarkin/secret-santa/internal/users"
@@ -89,29 +90,50 @@ func (s *Postgres) SaveOffset(ctx context.Context, next int64) error {
 	return nil
 }
 
-// ActiveGroupNames lists groups the person still belongs to.
-func (s *Postgres) ActiveGroupNames(ctx context.Context, userID int64) ([]string, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT g.name
-		FROM group_members m
-		JOIN groups g ON g.id = m.group_id
-		WHERE m.user_id = $1 AND m.status = 'ACTIVE' AND g.status = 'ACTIVE'
-		ORDER BY g.name
-	`, userID)
+// Session returns the wizard state. An expired session is deleted and reported as empty.
+func (s *Postgres) Session(ctx context.Context, userID int64, ttl time.Duration) (string, error) {
+	if ttl <= 0 {
+		ttl = 30 * time.Minute
+	}
+	var state string
+	var updated time.Time
+	err := s.pool.QueryRow(ctx, `
+		SELECT state, updated_at FROM bot_sessions WHERE user_id = $1
+	`, userID).Scan(&state, &updated)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
 	if err != nil {
-		return nil, fmt.Errorf("list groups: %w", err)
+		return "", fmt.Errorf("read session: %w", err)
 	}
-	defer rows.Close()
-	var names []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, fmt.Errorf("list groups: %w", err)
+	if time.Since(updated) > ttl {
+		if err := s.ClearSession(ctx, userID); err != nil {
+			return "", err
 		}
-		names = append(names, name)
+		return "", nil
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list groups: %w", err)
+	return state, nil
+}
+
+// SaveSession remembers the wizard step for one person.
+func (s *Postgres) SaveSession(ctx context.Context, userID int64, state string) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO bot_sessions (user_id, state, context, updated_at)
+		VALUES ($1, $2, '{}'::jsonb, now())
+		ON CONFLICT (user_id) DO UPDATE
+		SET state = EXCLUDED.state, context = '{}'::jsonb, updated_at = now()
+	`, userID, state)
+	if err != nil {
+		return fmt.Errorf("save session: %w", err)
 	}
-	return names, nil
+	return nil
+}
+
+// ClearSession drops the wizard step.
+func (s *Postgres) ClearSession(ctx context.Context, userID int64) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM bot_sessions WHERE user_id = $1`, userID)
+	if err != nil {
+		return fmt.Errorf("clear session: %w", err)
+	}
+	return nil
 }

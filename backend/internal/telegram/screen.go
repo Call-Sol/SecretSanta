@@ -29,8 +29,16 @@ const helpText = "🎄 Secret Santa\n\n" +
 
 const noGroupsText = "У тебя пока нет групп."
 
-const createLaterText = "Создание группы будет следующим шагом."
+const askGroupNameText = "Как назовём группу? Можно до 80 символов.\nОтмена — чтобы вернуться в меню."
+
+const invalidNameText = "Нужно название от 1 до 80 символов."
 
 const invalidLinkText = "🎄 Secret Santa\n\nСсылка недействительна."
 
+const inviteInvalidText = "Ссылка недействительна или отозвана."
+
+const notMemberText = "Ты не состоишь в этой группе."
+
 const unavailableText = "Это действие больше недоступно."
+
+const createFailedText = "Не получилось создать группу. Попробуй ещё раз."

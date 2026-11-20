@@ -2,18 +2,26 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"regexp"
 	"strings"
+	"time"
 
+	"github.com/alekseymakarkin/secret-santa/internal/groups"
 	"github.com/alekseymakarkin/secret-santa/internal/users"
 )
+
+var joinTokenLog = regexp.MustCompile(`join_[A-Za-z0-9_-]+`)
 
 // Store is the persistence for one polling process.
 type Store interface {
 	Claim(ctx context.Context, updateID int64, id users.Identity, present, markDM bool) (claimed bool, userID int64, err error)
 	SaveOffset(ctx context.Context, next int64) error
 	Offset(ctx context.Context) (int64, error)
-	ActiveGroupNames(ctx context.Context, userID int64) ([]string, error)
+	Session(ctx context.Context, userID int64, ttl time.Duration) (string, error)
+	SaveSession(ctx context.Context, userID int64, state string) error
+	ClearSession(ctx context.Context, userID int64) error
 }
 
 // Sender delivers menu screens to Telegram.
@@ -23,19 +31,38 @@ type Sender interface {
 	AnswerCallbackQuery(ctx context.Context, callbackID, text string) error
 }
 
-// Handler turns a private /start into a stored user and the main menu.
+// Options configures the private-chat handler.
+type Options struct {
+	BotUsername string
+	SessionTTL  time.Duration
+}
+
+// Handler turns private updates into the group and invite flows.
 type Handler struct {
-	store Store
-	send  Sender
-	log   *slog.Logger
+	store    Store
+	groups   groups.Directory
+	send     Sender
+	log      *slog.Logger
+	username string
+	ttl      time.Duration
 }
 
 // NewHandler builds the update handler.
-func NewHandler(store Store, send Sender, log *slog.Logger) *Handler {
+func NewHandler(store Store, directory groups.Directory, send Sender, log *slog.Logger, opts Options) *Handler {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Handler{store: store, send: send, log: log}
+	if opts.SessionTTL <= 0 {
+		opts.SessionTTL = 30 * time.Minute
+	}
+	return &Handler{
+		store:    store,
+		groups:   directory,
+		send:     send,
+		log:      log,
+		username: opts.BotUsername,
+		ttl:      opts.SessionTTL,
+	}
 }
 
 // Handle claims the update, stores the person, and replies in a private chat.
@@ -55,35 +82,91 @@ func (h *Handler) Handle(ctx context.Context, upd Update) error {
 		return nil
 	}
 	if err := h.reply(ctx, upd, userID); err != nil {
-		h.log.Error("telegram reply", "update_id", upd.UpdateID, "err", err.Error())
+		h.log.Error("telegram reply", "update_id", upd.UpdateID, "err", joinTokenLog.ReplaceAllString(err.Error(), "join_***"))
 	}
 	return nil
 }
 
 func (h *Handler) reply(ctx context.Context, upd Update, userID int64) error {
 	if upd.CallbackQuery != nil {
+		if err := h.store.ClearSession(ctx, userID); err != nil {
+			return err
+		}
 		return h.callback(ctx, upd, userID)
 	}
-	text, keyboard := messageScreen(upd.Message.Text)
-	return h.send.SendMessage(ctx, upd.ChatID(), text, keyboard)
+	text := ""
+	if upd.Message != nil {
+		text = upd.Message.Text
+	}
+	name, payload, isCommand := parseCommand(text)
+	if isCommand {
+		if err := h.store.ClearSession(ctx, userID); err != nil {
+			return err
+		}
+		switch name {
+		case "start":
+			text, keyboard := h.startScreen(ctx, payload)
+			return h.send.SendMessage(ctx, upd.ChatID(), text, keyboard)
+		case "help":
+			return h.send.SendMessage(ctx, upd.ChatID(), helpText, mainKeyboard())
+		default:
+			return h.send.SendMessage(ctx, upd.ChatID(), menuText, mainKeyboard())
+		}
+	}
+	if strings.EqualFold(strings.TrimSpace(text), "Отмена") {
+		if err := h.store.ClearSession(ctx, userID); err != nil {
+			return err
+		}
+		return h.send.SendMessage(ctx, upd.ChatID(), menuText, mainKeyboard())
+	}
+	state, err := h.store.Session(ctx, userID, h.ttl)
+	if err != nil {
+		return err
+	}
+	if state == "group_name" {
+		return h.createGroup(ctx, upd.ChatID(), userID, text)
+	}
+	return h.send.SendMessage(ctx, upd.ChatID(), menuText, mainKeyboard())
 }
 
-func messageScreen(text string) (string, Keyboard) {
-	name, payload, ok := parseCommand(text)
+func (h *Handler) startScreen(ctx context.Context, payload string) (string, Keyboard) {
+	token, ok := joinToken(payload)
+	if payload == "" {
+		return menuText, mainKeyboard()
+	}
 	if !ok {
-		return menuText, mainKeyboard()
-	}
-	switch name {
-	case "start":
-		if payload == "" || strings.HasPrefix(payload, "join_") {
-			return menuText, mainKeyboard()
-		}
 		return invalidLinkText, mainKeyboard()
-	case "help":
-		return helpText, mainKeyboard()
-	default:
-		return menuText, mainKeyboard()
 	}
+	preview, err := h.groups.Preview(ctx, token)
+	if err != nil {
+		h.log.Info("invite preview rejected", "err", err.Error())
+		return inviteInvalidText, mainKeyboard()
+	}
+	h.log.Info("invite preview", "invite_id", preview.InviteID, "group_id", preview.GroupID)
+	return joinPreviewScreen(preview)
+}
+
+func (h *Handler) createGroup(ctx context.Context, chatID, userID int64, name string) error {
+	created, err := h.groups.Create(ctx, userID, name)
+	if errors.Is(err, groups.ErrInvalidName) {
+		return h.send.SendMessage(ctx, chatID, invalidNameText+"\n\n"+askGroupNameText, Keyboard{})
+	}
+	if err != nil {
+		h.log.Error("create group", "err", err.Error())
+		return h.send.SendMessage(ctx, chatID, createFailedText, Keyboard{})
+	}
+	if err := h.store.ClearSession(ctx, userID); err != nil {
+		return err
+	}
+	h.log.Info("group created", "group_id", created.ID)
+	text, keyboard := groupCardScreen(groups.Card{
+		ID:          created.ID,
+		Name:        created.Name,
+		Role:        "OWNER",
+		MemberCount: created.MemberCount,
+		Token:       created.Token,
+	}, deeplink(h.username, created.Token))
+	return h.send.SendMessage(ctx, chatID, text, keyboard)
 }
 
 func (h *Handler) callback(ctx context.Context, upd Update, userID int64) error {
@@ -100,38 +183,99 @@ func (h *Handler) callback(ctx context.Context, upd Update, userID int64) error 
 	return h.send.SendMessage(ctx, upd.ChatID(), text, keyboard)
 }
 
-func (h *Handler) callbackScreen(ctx context.Context, data string, userID int64) (text string, keyboard Keyboard, toast string) {
-	keyboard = mainKeyboard()
-	switch data {
+func (h *Handler) callbackScreen(ctx context.Context, data string, userID int64) (string, Keyboard, string) {
+	verb, args, ok := parseCallback(data)
+	if !ok {
+		return unavailableText, mainKeyboard(), unavailableText
+	}
+	switch verb {
 	case "menu:home":
-		return menuText, keyboard, ""
+		return menuText, mainKeyboard(), ""
 	case "menu:help":
-		return helpText, keyboard, ""
+		return helpText, mainKeyboard(), ""
 	case "grp:new":
-		return createLaterText, keyboard, ""
-	case "grp:list":
-		names, err := h.store.ActiveGroupNames(ctx, userID)
-		if err != nil {
-			h.log.Error("list groups", "err", err.Error())
-			return noGroupsText, keyboard, ""
+		if err := h.store.SaveSession(ctx, userID, "group_name"); err != nil {
+			h.log.Error("save session", "err", err.Error())
+			return createFailedText, mainKeyboard(), ""
 		}
-		return groupsText(names), keyboard, ""
+		return askGroupNameText, Keyboard{}, ""
+	case "grp:list":
+		return h.listScreen(ctx, userID)
+	case "grp:open":
+		return h.openScreen(ctx, userID, args[0])
+	case "grp:members":
+		return h.membersScreen(ctx, userID, args[0])
+	case "inv:accept":
+		return h.acceptScreen(ctx, userID, args[0])
 	default:
-		return unavailableText, keyboard, unavailableText
+		return unavailableText, mainKeyboard(), unavailableText
 	}
 }
 
-func groupsText(names []string) string {
-	if len(names) == 0 {
-		return noGroupsText
+func (h *Handler) listScreen(ctx context.Context, userID int64) (string, Keyboard, string) {
+	items, err := h.groups.List(ctx, userID)
+	if err != nil {
+		h.log.Error("list groups", "err", err.Error())
+		return noGroupsText, mainKeyboard(), ""
 	}
-	var b strings.Builder
-	b.WriteString("Твои группы:")
-	for _, name := range names {
-		b.WriteString("\n• ")
-		b.WriteString(name)
+	text, keyboard := groupListScreen(items)
+	return text, keyboard, ""
+}
+
+func (h *Handler) openScreen(ctx context.Context, userID, groupID int64) (string, Keyboard, string) {
+	card, err := h.groups.Open(ctx, userID, groupID)
+	if errors.Is(err, groups.ErrNotMember) {
+		return notMemberText, mainKeyboard(), ""
 	}
-	return b.String()
+	if err != nil {
+		h.log.Error("open group", "group_id", groupID, "err", err.Error())
+		return unavailableText, mainKeyboard(), ""
+	}
+	text, keyboard := groupCardScreen(card, deeplink(h.username, card.Token))
+	return text, keyboard, ""
+}
+
+func (h *Handler) membersScreen(ctx context.Context, userID, groupID int64) (string, Keyboard, string) {
+	card, err := h.groups.Open(ctx, userID, groupID)
+	if errors.Is(err, groups.ErrNotMember) {
+		return notMemberText, mainKeyboard(), ""
+	}
+	if err != nil {
+		h.log.Error("open group", "group_id", groupID, "err", err.Error())
+		return unavailableText, mainKeyboard(), ""
+	}
+	people, err := h.groups.Members(ctx, userID, groupID)
+	if err != nil {
+		h.log.Error("list members", "group_id", groupID, "err", err.Error())
+		return unavailableText, mainKeyboard(), ""
+	}
+	text, keyboard := membersScreen(groupID, card.Name, people)
+	return text, keyboard, ""
+}
+
+func (h *Handler) acceptScreen(ctx context.Context, userID, inviteID int64) (string, Keyboard, string) {
+	result, err := h.groups.Accept(ctx, userID, inviteID)
+	if errors.Is(err, groups.ErrInviteInvalid) {
+		return inviteInvalidText, mainKeyboard(), ""
+	}
+	if err != nil {
+		h.log.Error("accept invite", "invite_id", inviteID, "err", err.Error())
+		return inviteInvalidText, mainKeyboard(), ""
+	}
+	h.log.Info("invite accepted", "invite_id", inviteID, "group_id", result.GroupID, "already", result.AlreadyMember)
+	text, keyboard := joinedScreen(result)
+	return text, keyboard, ""
+}
+
+func joinToken(payload string) (string, bool) {
+	if !strings.HasPrefix(payload, "join_") {
+		return "", false
+	}
+	token := strings.TrimPrefix(payload, "join_")
+	if token == "" || strings.ContainsAny(token, " \t\r\n/?#") {
+		return "", false
+	}
+	return token, true
 }
 
 func isNotModified(err error) bool {
