@@ -164,14 +164,17 @@ func (c *Client) AnswerCallbackQuery(ctx context.Context, callbackID, text strin
 }
 
 func keyboardBody(keyboard Keyboard) map[string]any {
-	rows := make([][]map[string]string, 0, len(keyboard.Rows))
+	rows := make([][]map[string]any, 0, len(keyboard.Rows))
 	for _, row := range keyboard.Rows {
-		out := make([]map[string]string, 0, len(row))
+		out := make([]map[string]any, 0, len(row))
 		for _, button := range row {
-			out = append(out, map[string]string{
-				"text":          button.Text,
-				"callback_data": button.Data,
-			})
+			item := map[string]any{"text": button.Text}
+			if button.Copy != "" {
+				item["copy_text"] = map[string]string{"text": button.Copy}
+			} else {
+				item["callback_data"] = button.Data
+			}
+			out = append(out, item)
 		}
 		rows = append(rows, out)
 	}

@@ -31,26 +31,36 @@ func groupListScreen(items []groups.Summary) (string, Keyboard) {
 
 func groupCardScreen(card groups.Card, link string) (string, Keyboard) {
 	var b strings.Builder
-	fmt.Fprintf(&b, "👥 %s\nУчастников: %d\nТы: %s", card.Name, card.MemberCount, roleLabel(card.Role))
+	fmt.Fprintf(&b, "👥 %s\nУчастников: %d", card.Name, card.MemberCount)
+	rows := make([][]Button, 0, 3)
+	if card.Role == "OWNER" {
+		b.WriteString("\nТы: владелец")
+		rows = append(rows, []Button{{Text: "Участники", Data: fmt.Sprintf("grp:members:%d", card.ID)}})
+	} else if card.OwnerName != "" {
+		fmt.Fprintf(&b, "\nВладелец: %s", card.OwnerName)
+	}
 	if link != "" {
 		fmt.Fprintf(&b, "\n\nСсылка для приглашения:\n%s", link)
+		rows = append(rows, []Button{{Text: "Пригласить", Copy: link}})
 	}
-	return b.String(), Keyboard{Rows: [][]Button{
-		{{Text: "Участники", Data: fmt.Sprintf("grp:members:%d", card.ID)}},
-		{{Text: "Пригласить", Data: fmt.Sprintf("grp:open:%d", card.ID)}},
-		{{Text: "Мои группы", Data: "grp:list"}},
-	}}
+	rows = append(rows, []Button{{Text: "Мои группы", Data: "grp:list"}})
+	return b.String(), Keyboard{Rows: rows}
 }
 
-func membersScreen(groupID int64, name string, people []groups.Person) (string, Keyboard) {
+func membersScreen(card groups.Card, people []groups.Person) (string, Keyboard) {
+	back := Keyboard{Rows: [][]Button{
+		{{Text: "К группе", Data: fmt.Sprintf("grp:open:%d", card.ID)}},
+	}}
+	if card.Role != "OWNER" {
+		text := fmt.Sprintf("👥 %s\nВладелец: %s\nУчастников: %d", card.Name, card.OwnerName, card.MemberCount)
+		return text, back
+	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "Участники «%s»:", name)
+	fmt.Fprintf(&b, "Участники «%s»:", card.Name)
 	for _, person := range people {
 		fmt.Fprintf(&b, "\n• %s — %s", person.DisplayName, roleLabel(person.Role))
 	}
-	return b.String(), Keyboard{Rows: [][]Button{
-		{{Text: "К группе", Data: fmt.Sprintf("grp:open:%d", groupID)}},
-	}}
+	return b.String(), back
 }
 
 func joinPreviewScreen(preview groups.Preview) (string, Keyboard) {

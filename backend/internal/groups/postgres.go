@@ -103,13 +103,18 @@ func (s *Postgres) Open(ctx context.Context, userID, groupID int64) (Card, error
 	var card Card
 	err := s.pool.QueryRow(ctx, `
 		SELECT g.id, g.name, m.role,
+			COALESCE((SELECT u.display_name
+			   FROM group_members om
+			   JOIN users u ON u.id = om.user_id
+			  WHERE om.group_id = g.id AND om.role = 'OWNER' AND om.status = 'ACTIVE'
+			  LIMIT 1), ''),
 			(SELECT count(*) FROM group_members mm
 			  WHERE mm.group_id = g.id AND mm.status = 'ACTIVE')
 		FROM group_members m
 		JOIN groups g ON g.id = m.group_id
 		WHERE m.user_id = $1 AND m.group_id = $2
 		  AND m.status = 'ACTIVE' AND g.status = 'ACTIVE'
-	`, userID, groupID).Scan(&card.ID, &card.Name, &card.Role, &card.MemberCount)
+	`, userID, groupID).Scan(&card.ID, &card.Name, &card.Role, &card.OwnerName, &card.MemberCount)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Card{}, ErrNotMember
 	}
@@ -137,19 +142,26 @@ func (s *Postgres) Open(ctx context.Context, userID, groupID int64) (Card, error
 	return card, nil
 }
 
-// Members lists active members. The caller must be one of them.
+// Members lists active members for the owner. Everyone else gets only the owner.
 func (s *Postgres) Members(ctx context.Context, userID, groupID int64) ([]Person, error) {
-	if _, err := s.Open(ctx, userID, groupID); err != nil {
+	card, err := s.Open(ctx, userID, groupID)
+	if err != nil {
 		return nil, err
 	}
-	rows, err := s.pool.Query(ctx, `
+	query := `
 		SELECT u.display_name, m.role
 		FROM group_members m
 		JOIN users u ON u.id = m.user_id
 		WHERE m.group_id = $1 AND m.status = 'ACTIVE'
+	`
+	if card.Role != "OWNER" {
+		query += ` AND m.role = 'OWNER'`
+	}
+	query += `
 		ORDER BY CASE m.role WHEN 'OWNER' THEN 0 WHEN 'ADMIN' THEN 1 ELSE 2 END,
 		         u.display_name, u.id
-	`, groupID)
+	`
+	rows, err := s.pool.Query(ctx, query, groupID)
 	if err != nil {
 		return nil, fmt.Errorf("list members: %w", err)
 	}

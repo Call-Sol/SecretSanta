@@ -4,6 +4,7 @@ package telegram
 type Button struct {
 	Text string
 	Data string
+	Copy string
 }
 
 // Keyboard is an inline keyboard, one slice per row.

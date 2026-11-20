@@ -73,12 +73,15 @@ func TestSendMessagePostsMenuKeyboard(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	err := NewClient("super-secret-token", WithBaseURL(srv.URL)).SendMessage(context.Background(), 42, menuText, mainKeyboard())
+	err := NewClient("super-secret-token", WithBaseURL(srv.URL)).SendMessage(context.Background(), 42, menuText, Keyboard{Rows: [][]Button{
+		mainKeyboard().Rows[0],
+		{{Text: "Пригласить", Copy: "https://t.me/secret_santa_bot?start=join_abc"}},
+	}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(body)
-	for _, part := range []string{`"chat_id":42`, "Мои группы", "grp:list", "Создать группу", "grp:new", "Помощь", "menu:help"} {
+	for _, part := range []string{`"chat_id":42`, "Мои группы", "grp:list", `"copy_text":{"text":"https://t.me/secret_santa_bot?start=join_abc"}`} {
 		if !strings.Contains(text, part) {
 			t.Fatalf("body missing %s: %s", part, text)
 		}

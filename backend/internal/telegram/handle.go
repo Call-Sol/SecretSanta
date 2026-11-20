@@ -249,7 +249,7 @@ func (h *Handler) membersScreen(ctx context.Context, userID, groupID int64) (str
 		h.log.Error("list members", "group_id", groupID, "err", err.Error())
 		return unavailableText, mainKeyboard(), ""
 	}
-	text, keyboard := membersScreen(groupID, card.Name, people)
+	text, keyboard := membersScreen(card, people)
 	return text, keyboard, ""
 }
 
