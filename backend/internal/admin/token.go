@@ -7,9 +7,17 @@ import (
 	"fmt"
 )
 
-// Deeplink is the Telegram start link for an invite token.
+// Deeplink is the Telegram start link for a group invite token.
 func Deeplink(botUsername, token string) string {
 	return "https://t.me/" + botUsername + "?start=join_" + token
+}
+
+// PlayLink is the Telegram start link that confirms participation in one game.
+func PlayLink(botUsername, token string) string {
+	if botUsername == "" || token == "" {
+		return ""
+	}
+	return "https://t.me/" + botUsername + "?start=play_" + token
 }
 
 func randomToken(n int) (string, error) {

@@ -13,6 +13,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/alekseymakarkin/secret-santa/internal/games"
 )
 
 func TestPanelLoginGroupsAndDeeplink(t *testing.T) {
@@ -155,6 +157,81 @@ func TestParseInviteOptions(t *testing.T) {
 	}
 	if _, err := parseInviteOptions(req, now); err != ErrInvalidInvite {
 		t.Fatalf("got %v", err)
+	}
+}
+
+func TestGamesPageShowsParticipantsWithoutPairs(t *testing.T) {
+	deadline := time.Date(2026, 12, 2, 0, 0, 0, 0, games.Moscow)
+	store := newMemStore()
+	store.games = []GameDetail{{
+		GameSummary: GameSummary{
+			ID: 9, Name: "Office party", GroupID: 3, GroupName: "Friends",
+			Status: "DRAWN", Confirmed: 1, ParticipantCount: 2,
+			CreatedAt: time.Date(2026, 11, 20, 7, 0, 0, 0, time.UTC),
+		},
+		Description: "red paper",
+		Deadline:    &deadline,
+		Exchange:    "2026-12-25",
+		InviteToken: "abcdefghijklmnopqr",
+		People: []GameParticipant{
+			{DisplayName: "Anna", Username: "anna", Status: "CONFIRMED", AssignmentState: "ASSIGNED"},
+			{DisplayName: "Boris", Status: "PENDING", AssignmentState: "NOT_APPLICABLE"},
+		},
+	}}
+	panel, err := New(store, Options{
+		Username: "operator", Password: "test-password", BotUsername: "secret_santa_bot", SessionTTL: time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(panel.Handler())
+	t.Cleanup(srv.Close)
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Jar: jar, CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	guest := clientDo(t, client, http.MethodGet, srv.URL+"/games", "")
+	if guest.StatusCode != http.StatusSeeOther || guest.Header.Get("Location") != "/login" {
+		t.Fatalf("guest %d %s", guest.StatusCode, guest.Header.Get("Location"))
+	}
+	loginPage := clientDo(t, client, http.MethodGet, srv.URL+"/login", "")
+	signedIn := clientDo(t, client, http.MethodPost, srv.URL+"/login", form(map[string]string{
+		"username": "operator",
+		"password": "test-password",
+		"csrf":     csrfValue(t, loginPage.Body),
+	}))
+	if signedIn.StatusCode != http.StatusSeeOther {
+		t.Fatalf("login %d", signedIn.StatusCode)
+	}
+	list := clientDo(t, client, http.MethodGet, srv.URL+"/games", "")
+	for _, part := range []string{"Office party", "Friends", "Drawn", "1 / 2", "/games/9"} {
+		if !strings.Contains(list.Body, part) {
+			t.Fatalf("list missing %s", part)
+		}
+	}
+	page := clientDo(t, client, http.MethodGet, srv.URL+"/games/9", "")
+	if page.StatusCode != http.StatusOK {
+		t.Fatalf("game %d", page.StatusCode)
+	}
+	for _, part := range []string{
+		"Office party", "red paper", "01 Dec 2026", "25 Dec 2026",
+		"https://t.me/secret_santa_bot?start=play_abcdefghijklmnopqr",
+		"Anna", "@anna", "Confirmed", "Has a receiver",
+		"Boris", "Pending", "Not in the draw",
+	} {
+		if !strings.Contains(page.Body, part) {
+			t.Fatalf("page missing %s", part)
+		}
+	}
+	if strings.Contains(page.Body, "Gives to") || strings.Contains(page.Body, "abcdefghijklmnopqr</") {
+		t.Fatal("game page exposed a pair or the raw token")
+	}
+	missing := clientDo(t, client, http.MethodGet, srv.URL+"/games/4", "")
+	if missing.StatusCode != http.StatusNotFound {
+		t.Fatalf("missing %d", missing.StatusCode)
 	}
 }
 
@@ -341,6 +418,7 @@ type memStore struct {
 	groups   map[int64]*Group
 	invites  map[int64]memInvite
 	people   []RegisteredUser
+	games    []GameDetail
 	next     int64
 }
 
@@ -405,6 +483,27 @@ func (m *memStore) CreateGroup(ctx context.Context, name string) (Group, error) 
 	g := Group{ID: m.next, Name: name, Status: "ACTIVE", CreatedAt: time.Now().UTC()}
 	m.groups[g.ID] = &g
 	return g, nil
+}
+
+func (m *memStore) ListGames(context.Context) ([]GameSummary, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]GameSummary, 0, len(m.games))
+	for _, game := range m.games {
+		out = append(out, game.GameSummary)
+	}
+	return out, nil
+}
+
+func (m *memStore) Game(_ context.Context, id int64) (GameDetail, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, game := range m.games {
+		if game.ID == id {
+			return game, nil
+		}
+	}
+	return GameDetail{}, ErrNotFound
 }
 
 func (m *memStore) ListUsers(context.Context) ([]RegisteredUser, error) {

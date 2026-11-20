@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/alekseymakarkin/secret-santa/internal/games"
 )
 
 const (
@@ -63,6 +65,16 @@ type usersPage struct {
 	Users []RegisteredUser
 }
 
+type gamesPage struct {
+	pageData
+	Games []GameSummary
+}
+
+type gamePage struct {
+	pageData
+	Detail GameDetail
+}
+
 type groupPage struct {
 	pageData
 	Detail GroupDetail
@@ -80,6 +92,8 @@ func New(store Store, opts Options) (*Server, error) {
 	tmpl, err := template.New("").Funcs(template.FuncMap{
 		"formatTime":         formatTime,
 		"formatOptionalTime": formatOptionalTime,
+		"formatDeadline":     formatDeadline,
+		"formatExchange":     formatExchange,
 	}).ParseFS(templateFS, "templates/*.html")
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)
@@ -104,6 +118,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /login", s.loginPOST)
 	mux.HandleFunc("POST /logout", s.logout)
 	mux.HandleFunc("GET /groups", s.groups)
+	mux.HandleFunc("GET /games", s.games)
+	mux.HandleFunc("GET /games/{id}", s.gameShow)
 	mux.HandleFunc("GET /users", s.users)
 	mux.HandleFunc("GET /groups/new", s.groupNew)
 	mux.HandleFunc("POST /groups", s.groupCreate)
@@ -187,6 +203,53 @@ func (s *Server) groups(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "groups", groupsPage{
 		pageData: pageData{Title: "Groups", Authed: true, CSRF: sess.CSRF},
 		Groups:   groups,
+	})
+}
+
+func (s *Server) games(w http.ResponseWriter, r *http.Request) {
+	_, sess, ok := s.requireSession(w, r)
+	if !ok {
+		return
+	}
+	items, err := s.store.ListGames(r.Context())
+	if err != nil {
+		s.log.Error("list games", "err", err)
+		http.Error(w, "Something went wrong.", http.StatusInternalServerError)
+		return
+	}
+	s.render(w, "games", gamesPage{
+		pageData: pageData{Title: "Games", Authed: true, CSRF: sess.CSRF},
+		Games:    items,
+	})
+}
+
+func (s *Server) gameShow(w http.ResponseWriter, r *http.Request) {
+	_, sess, ok := s.requireSession(w, r)
+	if !ok {
+		return
+	}
+	id, err := pathID(r)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	detail, err := s.store.Game(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		s.log.Error("get game", "err", err, "game_id", id)
+		http.Error(w, "Something went wrong.", http.StatusInternalServerError)
+		return
+	}
+	if detail.InviteToken != "" {
+		detail.Link = PlayLink(s.botUsername, detail.InviteToken)
+	}
+	detail.InviteToken = ""
+	s.render(w, "game", gamePage{
+		pageData: pageData{Title: detail.Name, Authed: true, CSRF: sess.CSRF},
+		Detail:   detail,
 	})
 }
 
@@ -521,4 +584,22 @@ func formatOptionalTime(t *time.Time) string {
 		return "Never"
 	}
 	return formatTime(*t)
+}
+
+func formatDeadline(t *time.Time) string {
+	if t == nil || t.IsZero() {
+		return "No deadline"
+	}
+	return t.In(games.Moscow).Add(-time.Second).Format("02 Jan 2006")
+}
+
+func formatExchange(iso string) string {
+	if iso == "" {
+		return "Not set"
+	}
+	day, err := time.Parse("2006-01-02", iso)
+	if err != nil {
+		return "Not set"
+	}
+	return day.Format("02 Jan 2006")
 }

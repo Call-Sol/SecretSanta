@@ -48,7 +48,7 @@ Also required, and done:
 - **Пригласить** copies the invite link to the clipboard. The link is also written on the group card.
 - Owner or admin can create a game: name, optional gift note, registration deadline, exchange date. The game opens in `REGISTRATION`.
 - While registration is open, a participant can confirm or decline, and can change that answer.
-- The operator panel can create groups, issue and revoke deeplinks, archive a group, and list registered users. It does not run games.
+- The operator panel can create groups, issue and revoke deeplinks, archive a group, list games without revealing who gives to whom, and list registered users. It does not start a draw.
 
 Explicitly out of the MVP, unchanged from the original draft: wishlists as a separate feature, anonymous questions, excluded pairs, reminders, gift-ready confirmation, a Mini App, more than one current game per group, and any language besides Russian in the bot.
 
@@ -225,7 +225,7 @@ Callback data is at most 64 bytes, `verb:action` or `verb:action:<id>`. Unknown 
 
 ## 7. Data model
 
-Built in migrations `00001`–`00006`:
+Built in migrations `00001`–`00008`:
 
 | Table | Purpose |
 |---|---|
@@ -233,16 +233,19 @@ Built in migrations `00001`–`00006`:
 | `groups` | Internal group. `owner_id` nullable. |
 | `group_members` | Role and `ACTIVE` / `LEFT`. |
 | `group_invites` | `token_hash` unique, `token` nullable for rows created before the column existed. |
-| `games` | Name, status, `description`, `registration_deadline`, `exchange_on`, `active_draw_id` with no foreign key yet. |
+| `games` | Name, status, `description`, `registration_deadline`, `exchange_on`, `invite_token` with `invite_token_hash`, `active_draw_id`. |
 | `game_participants` | Status, assignment state, unique `(game_id, user_id)`. |
 | `admin_sessions` | SHA-256 of the session token. `flash` is unused. |
 | `processed_updates` | One row per Telegram `update_id`. |
 | `bot_offsets` | Single polling cursor, id = 1. |
 | `bot_sessions` | Wizard state and JSON context, one row per user. |
+| `draws` | One version of a draw. At most one `ACTIVE` row per game. |
+| `assignments` | Giver and receiver participant ids for one draw. Same game as the draw. |
+| `notification_outbox` | Private messages committed with the draw. |
 
-Not created yet: `draws`, `assignments`, `notification_outbox`, `audit_logs`.
+Not created yet: `audit_logs`.
 
-`active_draw_id` stays a plain nullable bigint until `draws` exists. When draws are added, an assignment must belong to the same game as its draw, and exactly one draw per game may be `ACTIVE`.
+`games.active_draw_id` references `draws`. An assignment belongs to the same game as its draw.
 
 ## 8. Processes and layout
 
@@ -277,7 +280,11 @@ Cookies `admin_session` and `admin_csrf` are `HttpOnly` and `SameSite=Lax`. The 
 
 Pages are Go templates and Bootstrap from the CDN. Content-Security-Policy sets `script-src 'none'`. There is no copy button in the panel.
 
-Routes: `/login`, `/groups`, `/groups/new`, `/groups/{id}` (members and deeplinks), archive, create invite, revoke invite, `/users`. `/users` lists people who have a row: name, username, Telegram id, active group count, when they first opened the chat, and when they were registered. The panel does not create Telegram users.
+Routes: `/login`, `/groups`, `/groups/new`, `/groups/{id}` (members and deeplinks), archive, create invite, revoke invite, `/games`, `/games/{id}`, `/users`.
+
+`/games` lists every game: name, group, status, how many people confirmed out of all participant rows, and when it was created. `/games/{id}` shows the description, the registration deadline as the Moscow calendar day, the exchange date, the participation link (`https://t.me/<bot>?start=play_<token>`), and each participant's name, answer (`PENDING`, `CONFIRMED`, `DECLINED`), and draw state (`NOT_APPLICABLE`, `AWAITING_ASSIGNMENT`, `ASSIGNED`). "Has a receiver" does not name the receiver. The page does not read `assignments` or outbox payloads, and it cannot start or change a draw. The link still confirms participation only while registration is open.
+
+`/users` lists people who have a row: name, username, Telegram id, active group count, when they first opened the chat, and when they were registered. The panel does not create Telegram users.
 
 Details and the later panel work are in [admin.md](admin.md).
 
@@ -285,7 +292,7 @@ Details and the later panel work are in [admin.md](admin.md).
 
 - Do not put a receiver's name in a group message, a member list, an admin page, a log line, or an audit row.
 - Check the caller's user id and role on every mutation. Hiding a button is not the check.
-- Redact `join_<token>` from error logs.
+- Redact `join_<token>` and `play_<token>` from error logs.
 - The raw invite token in `group_invites.token` means a database copy contains live links. Encrypting that column is a later option. Deleting it after the first view is not.
 - Deduplicate `update_id`. Unique membership and unique participation stop double joins and double registration.
 

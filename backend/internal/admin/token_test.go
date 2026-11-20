@@ -25,4 +25,11 @@ func TestInviteTokenAndDeeplink(t *testing.T) {
 	if link != want {
 		t.Fatalf("link %s", link)
 	}
+	if PlayLink("", raw) != "" || PlayLink("secret_santa_bot", "") != "" {
+		t.Fatal("empty play link")
+	}
+	play := PlayLink("secret_santa_bot", raw)
+	if play != "https://t.me/secret_santa_bot?start=play_"+raw {
+		t.Fatalf("play link %s", play)
+	}
 }

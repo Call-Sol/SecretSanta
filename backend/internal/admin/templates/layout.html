@@ -18,6 +18,7 @@
     {{if .Authed}}
     <div class="d-flex align-items-center gap-3 ms-auto">
       <a class="link-light text-decoration-none" href="/groups">Groups</a>
+      <a class="link-light text-decoration-none" href="/games">Games</a>
       <a class="link-light text-decoration-none" href="/users">Users</a>
       <form method="post" action="/logout" class="m-0">
       <input type="hidden" name="csrf" value="{{.CSRF}}">

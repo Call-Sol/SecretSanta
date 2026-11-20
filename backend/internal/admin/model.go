@@ -83,6 +83,37 @@ type InviteOptions struct {
 	ExpiresAt *time.Time
 }
 
+// GameSummary is one row on the games list.
+type GameSummary struct {
+	ID               int64
+	Name             string
+	GroupID          int64
+	GroupName        string
+	Status           string
+	Confirmed        int
+	ParticipantCount int
+	CreatedAt        time.Time
+}
+
+// GameParticipant is one person in a game. It never includes a receiver.
+type GameParticipant struct {
+	DisplayName     string
+	Username        string
+	Status          string
+	AssignmentState string
+}
+
+// GameDetail is the monitoring page for one game.
+type GameDetail struct {
+	GameSummary
+	Description string
+	Deadline    *time.Time
+	Exchange    string
+	InviteToken string
+	Link        string
+	People      []GameParticipant
+}
+
 // NormalizeGroupName trims a group name and checks its length.
 func NormalizeGroupName(name string) (string, error) {
 	name = strings.TrimSpace(name)

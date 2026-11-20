@@ -1,0 +1,76 @@
+{{define "game"}}
+{{template "head" .}}
+{{template "nav" .}}
+<main class="container pb-5">
+  <p class="mb-2"><a href="/games">Games</a></p>
+  <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+    <h1 class="h3 mb-0">{{.Detail.Name}}</h1>
+    {{template "gameStatus" .Detail.Status}}
+  </div>
+  <div class="card shadow-sm mb-4">
+    <div class="card-body">
+      <dl class="row mb-0">
+        <dt class="col-sm-3">Group</dt>
+        <dd class="col-sm-9"><a href="/groups/{{.Detail.GroupID}}">{{.Detail.GroupName}}</a></dd>
+        <dt class="col-sm-3">Confirmed</dt>
+        <dd class="col-sm-9">{{.Detail.Confirmed}} / {{.Detail.ParticipantCount}}</dd>
+        <dt class="col-sm-3">Description</dt>
+        <dd class="col-sm-9">{{if .Detail.Description}}{{.Detail.Description}}{{else}}None{{end}}</dd>
+        <dt class="col-sm-3">Registration until</dt>
+        <dd class="col-sm-9">{{formatDeadline .Detail.Deadline}}</dd>
+        <dt class="col-sm-3">Exchange</dt>
+        <dd class="col-sm-9 mb-0">{{formatExchange .Detail.Exchange}}</dd>
+      </dl>
+    </div>
+  </div>
+
+  {{if .Detail.Link}}
+  <h2 class="h5">Participation link</h2>
+  <p class="text-secondary">Opening this link joins the group and confirms participation while registration is open.</p>
+  <div class="card shadow-sm mb-4">
+    <div class="card-body">
+      <input class="form-control" readonly value="{{.Detail.Link}}">
+    </div>
+  </div>
+  {{end}}
+
+  <h2 class="h5">Participants</h2>
+  {{if not .Detail.People}}
+  <p class="text-secondary">No participants yet.</p>
+  {{else}}
+  <div class="card shadow-sm">
+    <div class="table-responsive">
+      <table class="table align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Username</th>
+            <th>Participation</th>
+            <th>Draw</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Detail.People}}
+          <tr>
+            <td>{{.DisplayName}}</td>
+            <td>{{if .Username}}@{{.Username}}{{else}}—{{end}}</td>
+            <td>{{template "participation" .Status}}</td>
+            <td>{{template "assignment" .AssignmentState}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {{end}}
+</main>
+{{template "foot" .}}
+{{end}}
+
+{{define "participation"}}
+{{if eq . "CONFIRMED"}}Confirmed{{else if eq . "DECLINED"}}Declined{{else if eq . "PENDING"}}Pending{{else}}{{.}}{{end}}
+{{end}}
+
+{{define "assignment"}}
+{{if eq . "ASSIGNED"}}Has a receiver{{else if eq . "AWAITING_ASSIGNMENT"}}Waiting to be added{{else}}Not in the draw{{end}}
+{{end}}

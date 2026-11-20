@@ -1,0 +1,52 @@
+{{define "games"}}
+{{template "head" .}}
+{{template "nav" .}}
+<main class="container pb-5">
+  <h1 class="h3 mb-3">Games</h1>
+  {{if not .Games}}
+  <div class="card shadow-sm">
+    <div class="card-body text-secondary">No games yet.</div>
+  </div>
+  {{else}}
+  <div class="card shadow-sm">
+    <div class="table-responsive">
+      <table class="table table-hover align-middle mb-0">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Group</th>
+            <th>Status</th>
+            <th>Confirmed</th>
+            <th>Created</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Games}}
+          <tr>
+            <td>{{.Name}}</td>
+            <td><a href="/groups/{{.GroupID}}">{{.GroupName}}</a></td>
+            <td>{{template "gameStatus" .Status}}</td>
+            <td>{{.Confirmed}} / {{.ParticipantCount}}</td>
+            <td>{{formatTime .CreatedAt}}</td>
+            <td class="text-end"><a class="btn btn-sm btn-outline-dark" href="/games/{{.ID}}">Open</a></td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {{end}}
+</main>
+{{template "foot" .}}
+{{end}}
+
+{{define "gameStatus"}}
+{{if eq . "REGISTRATION"}}<span class="badge text-bg-success">Registration</span>
+{{else if eq . "LOCKED"}}<span class="badge text-bg-warning">Registration closed</span>
+{{else if eq . "DRAWN"}}<span class="badge text-bg-primary">Drawn</span>
+{{else if eq . "COMPLETED"}}<span class="badge text-bg-secondary">Completed</span>
+{{else if eq . "CANCELLED"}}<span class="badge text-bg-dark">Cancelled</span>
+{{else if eq . "DRAFT"}}<span class="badge text-bg-secondary">Draft</span>
+{{else}}<span class="badge text-bg-secondary">{{.}}</span>{{end}}
+{{end}}

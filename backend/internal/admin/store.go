@@ -20,6 +20,8 @@ type Store interface {
 	CreateGroup(ctx context.Context, name string) (Group, error)
 	ListGroups(ctx context.Context) ([]GroupSummary, error)
 	ListUsers(ctx context.Context) ([]RegisteredUser, error)
+	ListGames(ctx context.Context) ([]GameSummary, error)
+	Game(ctx context.Context, id int64) (GameDetail, error)
 	Group(ctx context.Context, id int64) (GroupDetail, error)
 	ArchiveGroup(ctx context.Context, id int64) error
 	CreateInvite(ctx context.Context, groupID int64, opts InviteOptions) error
@@ -164,6 +166,97 @@ func (s *Postgres) ListUsers(ctx context.Context) ([]RegisteredUser, error) {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
 	return out, nil
+}
+
+func (s *Postgres) ListGames(ctx context.Context) ([]GameSummary, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT g.id, g.name, gr.id, gr.name, g.status, g.created_at,
+			(SELECT count(*) FROM game_participants p
+			  WHERE p.game_id = g.id AND p.status = 'CONFIRMED'),
+			(SELECT count(*) FROM game_participants p WHERE p.game_id = g.id)
+		FROM games g
+		JOIN groups gr ON gr.id = g.group_id
+		ORDER BY g.created_at DESC, g.id DESC
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list games: %w", err)
+	}
+	defer rows.Close()
+	var out []GameSummary
+	for rows.Next() {
+		var item GameSummary
+		if err := rows.Scan(
+			&item.ID, &item.Name, &item.GroupID, &item.GroupName, &item.Status, &item.CreatedAt,
+			&item.Confirmed, &item.ParticipantCount,
+		); err != nil {
+			return nil, fmt.Errorf("list games: %w", err)
+		}
+		out = append(out, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list games: %w", err)
+	}
+	return out, nil
+}
+
+func (s *Postgres) Game(ctx context.Context, id int64) (GameDetail, error) {
+	var detail GameDetail
+	var description, exchange, token *string
+	err := s.pool.QueryRow(ctx, `
+		SELECT g.id, g.name, gr.id, gr.name, g.status, g.created_at,
+			g.description, g.registration_deadline, to_char(g.exchange_on, 'YYYY-MM-DD'), g.invite_token,
+			(SELECT count(*) FROM game_participants p
+			  WHERE p.game_id = g.id AND p.status = 'CONFIRMED'),
+			(SELECT count(*) FROM game_participants p WHERE p.game_id = g.id)
+		FROM games g
+		JOIN groups gr ON gr.id = g.group_id
+		WHERE g.id = $1
+	`, id).Scan(
+		&detail.ID, &detail.Name, &detail.GroupID, &detail.GroupName, &detail.Status, &detail.CreatedAt,
+		&description, &detail.Deadline, &exchange, &token,
+		&detail.Confirmed, &detail.ParticipantCount,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return GameDetail{}, ErrNotFound
+	}
+	if err != nil {
+		return GameDetail{}, fmt.Errorf("get game: %w", err)
+	}
+	if description != nil {
+		detail.Description = *description
+	}
+	if exchange != nil {
+		detail.Exchange = *exchange
+	}
+	if token != nil {
+		detail.InviteToken = *token
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT u.display_name, u.username, p.status, p.assignment_state
+		FROM game_participants p
+		JOIN users u ON u.id = p.user_id
+		WHERE p.game_id = $1
+		ORDER BY u.display_name, u.id
+	`, id)
+	if err != nil {
+		return GameDetail{}, fmt.Errorf("list game participants: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var person GameParticipant
+		var username *string
+		if err := rows.Scan(&person.DisplayName, &username, &person.Status, &person.AssignmentState); err != nil {
+			return GameDetail{}, fmt.Errorf("list game participants: %w", err)
+		}
+		if username != nil {
+			person.Username = *username
+		}
+		detail.People = append(detail.People, person)
+	}
+	if err := rows.Err(); err != nil {
+		return GameDetail{}, fmt.Errorf("list game participants: %w", err)
+	}
+	return detail, nil
 }
 
 func (s *Postgres) Group(ctx context.Context, id int64) (GroupDetail, error) {
