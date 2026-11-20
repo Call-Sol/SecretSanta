@@ -84,8 +84,12 @@ func TestCreateAndJoin(t *testing.T) {
 	}
 
 	list, err := directory.List(ctx, guest)
-	if err != nil || len(list) != 1 || list[0].Name != "Друзья" || list[0].Role != "MEMBER" {
-		t.Fatalf("list %+v err %v", list, err)
+	if err != nil || len(list) != 0 {
+		t.Fatalf("member groups %+v err %v", list, err)
+	}
+	ownerList, err := directory.List(ctx, owner)
+	if err != nil || len(ownerList) != 1 || ownerList[0].Name != "Друзья" || ownerList[0].Role != "OWNER" {
+		t.Fatalf("owner groups %+v err %v", ownerList, err)
 	}
 	guestView, err := directory.Members(ctx, guest, created.ID)
 	if err != nil || len(guestView) != 1 || guestView[0].Role != "OWNER" || guestView[0].DisplayName != "Анна" {

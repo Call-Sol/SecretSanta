@@ -344,7 +344,7 @@ func (s *Postgres) People(ctx context.Context, userID, gameID int64) ([]Particip
 		return nil, ErrForbidden
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT u.display_name, p.status, p.assignment_state
+		SELECT u.display_name, COALESCE(u.username, ''), p.status, p.assignment_state
 		FROM game_participants p
 		JOIN users u ON u.id = p.user_id
 		WHERE p.game_id = $1
@@ -357,7 +357,7 @@ func (s *Postgres) People(ctx context.Context, userID, gameID int64) ([]Particip
 	var out []Participant
 	for rows.Next() {
 		var person Participant
-		if err := rows.Scan(&person.DisplayName, &person.Status, &person.AssignmentState); err != nil {
+		if err := rows.Scan(&person.DisplayName, &person.Username, &person.Status, &person.AssignmentState); err != nil {
 			return nil, fmt.Errorf("list participants: %w", err)
 		}
 		out = append(out, person)

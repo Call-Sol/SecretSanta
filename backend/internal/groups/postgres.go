@@ -70,7 +70,7 @@ func (s *Postgres) Create(ctx context.Context, userID int64, name string) (Creat
 	return created, nil
 }
 
-// List returns the caller's active groups.
+// List returns active groups where the caller is the owner or an administrator.
 func (s *Postgres) List(ctx context.Context, userID int64) ([]Summary, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT g.id, g.name, m.role,
@@ -79,6 +79,7 @@ func (s *Postgres) List(ctx context.Context, userID int64) ([]Summary, error) {
 		FROM group_members m
 		JOIN groups g ON g.id = m.group_id
 		WHERE m.user_id = $1 AND m.status = 'ACTIVE' AND g.status = 'ACTIVE'
+		  AND m.role IN ('OWNER', 'ADMIN')
 		ORDER BY g.name, g.id
 	`, userID)
 	if err != nil {
@@ -109,13 +110,18 @@ func (s *Postgres) Open(ctx context.Context, userID, groupID int64) (Card, error
 			   JOIN users u ON u.id = om.user_id
 			  WHERE om.group_id = g.id AND om.role = 'OWNER' AND om.status = 'ACTIVE'
 			  LIMIT 1), ''),
+			COALESCE((SELECT u.username
+			   FROM group_members om
+			   JOIN users u ON u.id = om.user_id
+			  WHERE om.group_id = g.id AND om.role = 'OWNER' AND om.status = 'ACTIVE'
+			  LIMIT 1), ''),
 			(SELECT count(*) FROM group_members mm
 			  WHERE mm.group_id = g.id AND mm.status = 'ACTIVE')
 		FROM group_members m
 		JOIN groups g ON g.id = m.group_id
 		WHERE m.user_id = $1 AND m.group_id = $2
 		  AND m.status = 'ACTIVE' AND g.status = 'ACTIVE'
-	`, userID, groupID).Scan(&card.ID, &card.Name, &card.Role, &card.OwnerName, &card.MemberCount)
+	`, userID, groupID).Scan(&card.ID, &card.Name, &card.Role, &card.OwnerName, &card.OwnerUsername, &card.MemberCount)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Card{}, ErrNotMember
 	}
@@ -150,7 +156,7 @@ func (s *Postgres) Members(ctx context.Context, userID, groupID int64) ([]Person
 		return nil, err
 	}
 	query := `
-		SELECT u.display_name, m.role
+		SELECT u.display_name, COALESCE(u.username, ''), m.role
 		FROM group_members m
 		JOIN users u ON u.id = m.user_id
 		WHERE m.group_id = $1 AND m.status = 'ACTIVE'
@@ -170,7 +176,7 @@ func (s *Postgres) Members(ctx context.Context, userID, groupID int64) ([]Person
 	var out []Person
 	for rows.Next() {
 		var person Person
-		if err := rows.Scan(&person.DisplayName, &person.Role); err != nil {
+		if err := rows.Scan(&person.DisplayName, &person.Username, &person.Role); err != nil {
 			return nil, fmt.Errorf("list members: %w", err)
 		}
 		out = append(out, person)

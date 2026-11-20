@@ -38,7 +38,7 @@ func groupCardScreen(card groups.Card, link string, game *games.View) (string, K
 		b.WriteString("\nТы: владелец")
 		rows = append(rows, []Button{{Text: "Участники", Data: fmt.Sprintf("grp:members:%d", card.ID)}})
 	} else if card.OwnerName != "" {
-		fmt.Fprintf(&b, "\nВладелец: %s", card.OwnerName)
+		fmt.Fprintf(&b, "\nВладелец: %s", personLabel(card.OwnerName, card.OwnerUsername))
 	}
 	if game != nil {
 		fmt.Fprintf(&b, "\nТекущая игра: %s", game.Name)
@@ -59,13 +59,13 @@ func membersScreen(card groups.Card, people []groups.Person) (string, Keyboard) 
 		{{Text: "К группе", Data: fmt.Sprintf("grp:open:%d", card.ID)}},
 	}}
 	if card.Role != "OWNER" {
-		text := fmt.Sprintf("👥 %s\nВладелец: %s\nУчастников: %d", card.Name, card.OwnerName, card.MemberCount)
+		text := fmt.Sprintf("👥 %s\nВладелец: %s\nУчастников: %d", card.Name, personLabel(card.OwnerName, card.OwnerUsername), card.MemberCount)
 		return text, back
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "Участники «%s»:", card.Name)
 	for _, person := range people {
-		fmt.Fprintf(&b, "\n• %s — %s", person.DisplayName, roleLabel(person.Role))
+		fmt.Fprintf(&b, "\n• %s — %s", personLabel(person.DisplayName, person.Username), roleLabel(person.Role))
 	}
 	return b.String(), back
 }
@@ -109,6 +109,14 @@ func roleLabel(role string) string {
 	default:
 		return "участник"
 	}
+}
+
+func personLabel(name, username string) string {
+	username = strings.TrimPrefix(strings.TrimSpace(username), "@")
+	if username == "" || strings.ContainsAny(username, " \t\r\n/<>&\"'?#") {
+		return name
+	}
+	return name + " (@" + username + ")"
 }
 
 func buttonLabel(name string) string {

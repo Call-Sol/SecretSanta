@@ -72,7 +72,7 @@ func gameCardScreen(view games.View, intro, inviteLink string) (string, Keyboard
 		fmt.Fprintf(&b, "\n\nСсылка для участия:\n%s", inviteLink)
 		rows = append(rows, []Button{{Text: "Пригласить в игру", Copy: inviteLink}})
 	}
-	rows = append(rows, []Button{{Text: "К группе", Data: fmt.Sprintf("grp:open:%d", view.GroupID)}})
+	rows = append(rows, []Button{{Text: "В меню", Data: "menu:home"}})
 	return b.String(), Keyboard{Rows: rows}
 }
 
@@ -84,15 +84,16 @@ func gamePeopleScreen(view games.View, people []games.Participant) (string, Keyb
 		"waiting":   nil,
 	}
 	for _, person := range people {
+		label := personLabel(person.DisplayName, person.Username)
 		switch {
 		case person.AssignmentState == "AWAITING_ASSIGNMENT":
-			groups["waiting"] = append(groups["waiting"], person.DisplayName)
+			groups["waiting"] = append(groups["waiting"], label)
 		case person.Status == games.Confirmed:
-			groups["confirmed"] = append(groups["confirmed"], person.DisplayName)
+			groups["confirmed"] = append(groups["confirmed"], label)
 		case person.Status == games.Pending:
-			groups["pending"] = append(groups["pending"], person.DisplayName)
+			groups["pending"] = append(groups["pending"], label)
 		case person.Status == games.Declined:
-			groups["declined"] = append(groups["declined"], person.DisplayName)
+			groups["declined"] = append(groups["declined"], label)
 		}
 	}
 	var b strings.Builder

@@ -72,9 +72,9 @@ func TestMemberCardHidesTheRoster(t *testing.T) {
 		}
 	}
 	limited, _ := membersScreen(groups.Card{
-		ID: 1, Name: "Друзья", Role: "MEMBER", OwnerName: "Анна", MemberCount: 4,
-	}, []groups.Person{{DisplayName: "Борис", Role: "MEMBER"}, {DisplayName: "Анна", Role: "OWNER"}})
-	if strings.Contains(limited, "Борис") || !strings.Contains(limited, "Анна") || !strings.Contains(limited, "Участников: 4") {
+		ID: 1, Name: "Друзья", Role: "MEMBER", OwnerName: "Анна", OwnerUsername: "anna", MemberCount: 4,
+	}, []groups.Person{{DisplayName: "Борис", Username: "boris", Role: "MEMBER"}, {DisplayName: "Анна", Username: "anna", Role: "OWNER"}})
+	if strings.Contains(limited, "Борис") || !strings.Contains(limited, "Анна (@anna)") || !strings.Contains(limited, "Участников: 4") {
 		t.Fatalf("limited %q", limited)
 	}
 }

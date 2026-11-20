@@ -170,7 +170,7 @@ func deliver(ctx context.Context, pool *pgxpool.Pool, sender Sender, log *slog.L
 		log.Info("outbox failed", "id", item.ID, "user_id", item.UserID, "class", "bad payload")
 		return
 	}
-	text := draws.FormatAssignment(payload.GameName, payload.ReceiverName, payload.Description, payload.ExchangeOn)
+	text := draws.FormatAssignment(payload.GameName, payload.ReceiverName, payload.ReceiverUsername, payload.Description, payload.ExchangeOn)
 	err := sender.SendAssignment(ctx, item.ChatID, text, item.GameID)
 	if err == nil {
 		mark(ctx, pool, item.ID, "SENT", time.Time{}, "")

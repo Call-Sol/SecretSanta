@@ -20,17 +20,19 @@ type Summary struct {
 
 // Card is the group screen for a member.
 type Card struct {
-	ID          int64
-	Name        string
-	Role        string
-	OwnerName   string
-	MemberCount int
-	Token       string
+	ID            int64
+	Name          string
+	Role          string
+	OwnerName     string
+	OwnerUsername string
+	MemberCount   int
+	Token         string
 }
 
 // Person is one active member.
 type Person struct {
 	DisplayName string
+	Username    string
 	Role        string
 }
 

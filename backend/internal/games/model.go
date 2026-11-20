@@ -50,6 +50,7 @@ type InviteResult struct {
 // Participant is one person in a game, for the organizer's lists.
 type Participant struct {
 	DisplayName     string
+	Username        string
 	Status          string
 	AssignmentState string
 }

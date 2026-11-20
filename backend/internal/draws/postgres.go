@@ -32,6 +32,7 @@ type seat struct {
 	participantID int64
 	userID        int64
 	name          string
+	username      string
 }
 
 // Run builds one cycle for the confirmed members and queues a private message for each giver.
@@ -128,10 +129,11 @@ func (s *Postgres) Run(ctx context.Context, userID, gameID int64) error {
 			giver := byParticipant[edge.GiverID]
 			receiver := byParticipant[edge.ReceiverID]
 			payload, err := json.Marshal(AssignmentPayload{
-				GameName:     name,
-				ReceiverName: receiver.name,
-				Description:  note,
-				ExchangeOn:   exchangeOn,
+				GameName:         name,
+				ReceiverName:     receiver.name,
+				ReceiverUsername: receiver.username,
+				Description:      note,
+				ExchangeOn:       exchangeOn,
 			})
 			if err != nil {
 				return err
@@ -169,7 +171,7 @@ func (s *Postgres) Run(ctx context.Context, userID, gameID int64) error {
 
 func confirmedSeats(ctx context.Context, tx pgx.Tx, gameID, groupID int64) ([]seat, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT p.id, p.user_id, u.display_name
+		SELECT p.id, p.user_id, u.display_name, COALESCE(u.username, '')
 		FROM game_participants p
 		JOIN users u ON u.id = p.user_id
 		JOIN group_members m ON m.group_id = $2 AND m.user_id = p.user_id AND m.status = 'ACTIVE'
@@ -183,7 +185,7 @@ func confirmedSeats(ctx context.Context, tx pgx.Tx, gameID, groupID int64) ([]se
 	var people []seat
 	for rows.Next() {
 		var person seat
-		if err := rows.Scan(&person.participantID, &person.userID, &person.name); err != nil {
+		if err := rows.Scan(&person.participantID, &person.userID, &person.name, &person.username); err != nil {
 			return nil, err
 		}
 		people = append(people, person)
@@ -219,7 +221,8 @@ func (s *Postgres) ViewMine(ctx context.Context, userID, gameID int64) (Mine, er
 	var description *string
 	var exchange *string
 	err = s.pool.QueryRow(ctx, `
-		SELECT g.id, g.group_id, g.name, g.description, to_char(g.exchange_on, 'YYYY-MM-DD'), ru.display_name
+		SELECT g.id, g.group_id, g.name, g.description, to_char(g.exchange_on, 'YYYY-MM-DD'),
+		       ru.display_name, COALESCE(ru.username, '')
 		FROM games g
 		JOIN game_participants me ON me.game_id = g.id AND me.user_id = $2
 		JOIN assignments a ON a.giver_participant_id = me.id AND a.game_id = g.id
@@ -227,7 +230,7 @@ func (s *Postgres) ViewMine(ctx context.Context, userID, gameID int64) (Mine, er
 		JOIN game_participants them ON them.id = a.receiver_participant_id
 		JOIN users ru ON ru.id = them.user_id
 		WHERE g.id = $1 AND me.assignment_state = 'ASSIGNED'
-	`, gameID, userID).Scan(&mine.GameID, &mine.GroupID, &mine.GameName, &description, &exchange, &mine.ReceiverName)
+	`, gameID, userID).Scan(&mine.GameID, &mine.GroupID, &mine.GameName, &description, &exchange, &mine.ReceiverName, &mine.ReceiverUsername)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Mine{}, ErrNotAssigned
 	}

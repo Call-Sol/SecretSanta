@@ -20,10 +20,10 @@ func TestGameCardListsParticipantsOnlyForOrganizers(t *testing.T) {
 
 func TestPeopleScreenKeepsWaitingOutOfConfirmed(t *testing.T) {
 	text, _ := gamePeopleScreen(games.View{ID: 5, Name: "Тайный Санта 2026"}, []games.Participant{
-		{DisplayName: "Анна", Status: games.Confirmed, AssignmentState: "ASSIGNED"},
+		{DisplayName: "Анна", Username: "anna", Status: games.Confirmed, AssignmentState: "ASSIGNED"},
 		{DisplayName: "Виктор", Status: games.Confirmed, AssignmentState: "AWAITING_ASSIGNMENT"},
 	})
-	if !strings.Contains(text, "Подтвердили:\n• Анна") || !strings.Contains(text, "Ожидают включения:\n• Виктор") {
+	if !strings.Contains(text, "Подтвердили:\n• Анна (@anna)") || !strings.Contains(text, "Ожидают включения:\n• Виктор") {
 		t.Fatalf("text %q", text)
 	}
 	if strings.Contains(text, "Подтвердили:\n• Виктор") || !strings.Contains(text, "Ожидают решения:\n• нет") {
@@ -41,7 +41,7 @@ func TestOrganizerCanStartTheDraw(t *testing.T) {
 		t.Fatal("member can start the draw")
 	}
 	_, drawn := gameCardScreen(games.View{ID: 5, GroupID: 3, Role: "MEMBER", Status: "DRAWN", Assignment: "ASSIGNED"}, "", "")
-	if hasData(drawn, "game:draw:5") || !hasData(drawn, "game:mine:5") {
+	if hasData(drawn, "game:draw:5") || !hasData(drawn, "game:mine:5") || !hasData(drawn, "menu:home") || hasData(drawn, "grp:open:3") {
 		t.Fatal("drawn card buttons")
 	}
 }

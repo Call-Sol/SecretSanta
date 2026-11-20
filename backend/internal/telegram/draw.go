@@ -70,7 +70,7 @@ func (h *Handler) mineScreen(ctx context.Context, userID, gameID int64) (string,
 		h.log.Error("view assignment", "game_id", gameID, "err", err.Error())
 		return unavailableText, mainKeyboard(), ""
 	}
-	text := draws.FormatAssignment(mine.GameName, mine.ReceiverName, mine.Description, mine.Exchange)
+	text := draws.FormatAssignment(mine.GameName, mine.ReceiverName, mine.ReceiverUsername, mine.Description, mine.Exchange)
 	keyboard := Keyboard{Rows: [][]Button{
 		{{Text: "К игре", Data: fmt.Sprintf("game:open:%d", mine.GameID)}},
 	}}
