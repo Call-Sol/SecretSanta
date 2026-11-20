@@ -2,7 +2,6 @@ package telegram
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -15,9 +14,9 @@ func gameCardScreen(view games.View, intro string) (string, Keyboard) {
 		b.WriteString(intro)
 		b.WriteString("\n\n")
 	}
-	fmt.Fprintf(&b, "🎁 %s\nСтатус: %s\nПодтвердили: %d / %d\nБюджет: %s\n%s\nОбмен: %s",
+	fmt.Fprintf(&b, "🎁 %s\nСтатус: %s\nПодтвердили: %d / %d\nОписание: %s\n%s\nОбмен: %s",
 		view.Name, gameStatusLabel(view.Status), view.Confirmed, view.Participants,
-		formatBudget(view.Budget), formatDeadline(view.Deadline), formatExchange(view.Exchange))
+		formatDescription(view.Description), formatDeadline(view.Deadline), formatExchange(view.Exchange))
 	switch view.Mine {
 	case games.Pending:
 		b.WriteString("\n\nТы ещё не подтвердил участие.")
@@ -65,20 +64,11 @@ func gameStatusLabel(status string) string {
 	}
 }
 
-func formatBudget(budget *int) string {
-	if budget == nil {
-		return "не задан"
+func formatDescription(description string) string {
+	if description == "" {
+		return "не задано"
 	}
-	raw := strconv.Itoa(*budget)
-	var b strings.Builder
-	for i, r := range raw {
-		if i > 0 && (len(raw)-i)%3 == 0 {
-			b.WriteByte(' ')
-		}
-		b.WriteRune(r)
-	}
-	b.WriteString(" ₽")
-	return b.String()
+	return description
 }
 
 func formatDeadline(deadline *time.Time) string {

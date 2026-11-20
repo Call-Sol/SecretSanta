@@ -129,7 +129,7 @@ func (h *Handler) reply(ctx context.Context, upd Update, userID int64) error {
 	switch state {
 	case "group_name":
 		return h.createGroup(ctx, upd.ChatID(), userID, text)
-	case "game_name", "game_budget", "game_deadline", "game_exchange":
+	case "game_name", "game_description", "game_deadline", "game_exchange":
 		return h.gameWizard(ctx, upd.ChatID(), userID, state, raw, text)
 	default:
 		return h.send.SendMessage(ctx, upd.ChatID(), menuText, mainKeyboard())

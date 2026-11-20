@@ -78,14 +78,13 @@ func TestCreateGameKeepsMembersPending(t *testing.T) {
 		t.Fatal(err)
 	}
 	end := games.EndOfDay(day)
-	budget := 2000
 	view, err := catalog.Create(ctx, owner, created.ID, games.Input{
-		Name: "  Тайный Санта 2026 ", Budget: &budget, Deadline: &end, Exchange: "2026-12-25",
+		Name: "  Тайный Санта 2026 ", Description: "  до 2000 ₽, красный ", Deadline: &end, Exchange: "2026-12-25",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if view.Name != "Тайный Санта 2026" || view.Mine != games.Pending || view.Confirmed != 0 || view.Participants != 2 || view.Exchange != "2026-12-25" || view.Budget == nil || *view.Budget != 2000 {
+	if view.Name != "Тайный Санта 2026" || view.Mine != games.Pending || view.Confirmed != 0 || view.Participants != 2 || view.Exchange != "2026-12-25" || view.Description != "до 2000 ₽, красный" {
 		t.Fatalf("view %+v", view)
 	}
 	if view.Deadline == nil || !view.Deadline.Equal(end) {

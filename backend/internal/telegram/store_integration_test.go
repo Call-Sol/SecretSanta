@@ -61,11 +61,11 @@ func TestClaimUpsertsUserOnce(t *testing.T) {
 	}
 
 	raw := []byte(`{"group_id":1,"name":"Игра"}`)
-	if err := store.SaveSession(ctx, userID, "game_budget", raw); err != nil {
+	if err := store.SaveSession(ctx, userID, "game_description", raw); err != nil {
 		t.Fatal(err)
 	}
 	state, got, err := store.Session(ctx, userID, time.Hour)
-	if err != nil || state != "game_budget" || string(got) == "" {
+	if err != nil || state != "game_description" || string(got) == "" {
 		t.Fatalf("session %q %s err %v", state, got, err)
 	}
 }

@@ -12,10 +12,10 @@ import (
 )
 
 type gameDraft struct {
-	GroupID  int64  `json:"group_id"`
-	Name     string `json:"name,omitempty"`
-	Budget   *int   `json:"budget,omitempty"`
-	Deadline string `json:"deadline,omitempty"`
+	GroupID     int64  `json:"group_id"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	Deadline    string `json:"deadline,omitempty"`
 }
 
 func (h *Handler) startGame(ctx context.Context, userID, groupID int64) (string, Keyboard, string) {
@@ -100,13 +100,13 @@ func (h *Handler) gameWizard(ctx context.Context, chatID, userID int64, state st
 			return h.send.SendMessage(ctx, chatID, invalidNameText+"\n\n"+askGameNameText, Keyboard{})
 		}
 		draft.Name = name
-		return h.saveGameStep(ctx, chatID, userID, "game_budget", draft, askGameBudgetText)
-	case "game_budget":
-		budget, err := games.ParseBudget(text)
+		return h.saveGameStep(ctx, chatID, userID, "game_description", draft, askGameDescriptionText)
+	case "game_description":
+		description, err := games.NormalizeDescription(text)
 		if err != nil {
-			return h.send.SendMessage(ctx, chatID, invalidBudgetText+"\n\n"+askGameBudgetText, Keyboard{})
+			return h.send.SendMessage(ctx, chatID, invalidDescriptionText+"\n\n"+askGameDescriptionText, Keyboard{})
 		}
-		draft.Budget = budget
+		draft.Description = description
 		return h.saveGameStep(ctx, chatID, userID, "game_deadline", draft, askGameDeadlineText)
 	case "game_deadline":
 		day, skip, err := games.ParseDay(text)
@@ -133,7 +133,7 @@ func (h *Handler) finishGame(ctx context.Context, chatID, userID int64, draft ga
 	if err != nil {
 		return h.send.SendMessage(ctx, chatID, invalidDateText+"\n\n"+askGameExchangeText, Keyboard{})
 	}
-	input := games.Input{Name: draft.Name, Budget: draft.Budget}
+	input := games.Input{Name: draft.Name, Description: draft.Description}
 	if draft.Deadline != "" {
 		deadline, err := time.ParseInLocation("2006-01-02", draft.Deadline, games.Moscow)
 		if err != nil {
@@ -157,7 +157,7 @@ func (h *Handler) finishGame(ctx context.Context, chatID, userID int64, draft ga
 	if errors.Is(err, games.ErrForbidden) {
 		return h.send.SendMessage(ctx, chatID, forbiddenText, mainKeyboard())
 	}
-	if errors.Is(err, games.ErrInvalidName) || errors.Is(err, games.ErrInvalidBudget) || errors.Is(err, games.ErrInvalidDate) {
+	if errors.Is(err, games.ErrInvalidName) || errors.Is(err, games.ErrInvalidDescription) || errors.Is(err, games.ErrInvalidDate) {
 		return h.send.SendMessage(ctx, chatID, gameFailedText, mainKeyboard())
 	}
 	if err != nil {

@@ -16,10 +16,10 @@ const (
 
 // Input is what the organizer sends to open registration.
 type Input struct {
-	Name     string
-	Budget   *int
-	Deadline *time.Time
-	Exchange string
+	Name        string
+	Description string
+	Deadline    *time.Time
+	Exchange    string
 }
 
 // View is the game card for one member.
@@ -28,7 +28,7 @@ type View struct {
 	GroupID      int64
 	Name         string
 	Status       string
-	Budget       *int
+	Description  string
 	Deadline     *time.Time
 	Exchange     string
 	Confirmed    int

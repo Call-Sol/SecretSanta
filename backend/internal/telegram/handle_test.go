@@ -92,10 +92,9 @@ type memGames struct {
 func (m *memGames) Create(_ context.Context, _ int64, groupID int64, input games.Input) (games.View, error) {
 	m.calls++
 	m.created = input
-	budget := input.Budget
 	return games.View{
 		ID: 5, GroupID: groupID, Name: input.Name, Status: "REGISTRATION",
-		Budget: budget, Deadline: input.Deadline, Exchange: input.Exchange,
+		Description: input.Description, Deadline: input.Deadline, Exchange: input.Exchange,
 		Participants: 1, Mine: games.Pending,
 	}, nil
 }
@@ -462,7 +461,7 @@ func TestCreateGameWizard(t *testing.T) {
 	steps := []Update{
 		{UpdateID: 20, CallbackQuery: &CallbackQuery{ID: "cb", From: from, Message: msg, Data: "game:create:3"}},
 		private(21, "  Тайный Санта 2026 "),
-		private(22, "2 000"),
+		private(22, "  до 2000 ₽, красный "),
 		private(23, "01.01.2030"),
 		private(24, "-"),
 	}
@@ -471,7 +470,7 @@ func TestCreateGameWizard(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if catalog.calls != 1 || catalog.created.Name != "Тайный Санта 2026" || catalog.created.Budget == nil || *catalog.created.Budget != 2000 || catalog.created.Exchange != "" {
+	if catalog.calls != 1 || catalog.created.Name != "Тайный Санта 2026" || catalog.created.Description != "до 2000 ₽, красный" || catalog.created.Exchange != "" {
 		t.Fatalf("created %+v calls %d", catalog.created, catalog.calls)
 	}
 	day, _, err := games.ParseDay("01.01.2030")
@@ -484,8 +483,17 @@ func TestCreateGameWizard(t *testing.T) {
 	if store.sessions[7] != "" {
 		t.Fatal("session left open")
 	}
+	var asked bool
+	for _, m := range send.msgs {
+		if strings.Contains(m.text, "Можешь написать здесь пожелания к подаркам.") {
+			asked = true
+		}
+	}
+	if !asked {
+		t.Fatal("description hint was not shown")
+	}
 	last := send.msgs[len(send.msgs)-1].text
-	for _, part := range []string{"Игра создана.", "Регистрация", "2 000 ₽", "Регистрация до: 01.01.2030", "Ты ещё не подтвердил участие."} {
+	for _, part := range []string{"Игра создана.", "Регистрация", "Описание: до 2000 ₽, красный", "Регистрация до: 01.01.2030", "Ты ещё не подтвердил участие."} {
 		if !strings.Contains(last, part) {
 			t.Fatalf("card %q missing %s", last, part)
 		}

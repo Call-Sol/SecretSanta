@@ -23,7 +23,7 @@ func NewPostgres(pool *pgxpool.Pool) *Postgres {
 }
 
 const viewSelect = `
-	SELECT g.id, g.group_id, g.name, g.status, g.budget_rub, g.registration_deadline,
+	SELECT g.id, g.group_id, g.name, g.status, g.description, g.registration_deadline,
 	       to_char(g.exchange_on, 'YYYY-MM-DD'),
 	       (SELECT count(*) FROM game_participants cp
 	         WHERE cp.game_id = g.id AND cp.status = 'CONFIRMED'),
@@ -40,8 +40,12 @@ func (s *Postgres) Create(ctx context.Context, userID, groupID int64, input Inpu
 	if err != nil {
 		return View{}, err
 	}
-	if input.Budget != nil && (*input.Budget < 1 || *input.Budget > maxBudgetRub) {
-		return View{}, ErrInvalidBudget
+	var description string
+	if input.Description != "" {
+		description, err = NormalizeDescription(input.Description)
+		if err != nil {
+			return View{}, err
+		}
 	}
 	if input.Exchange != "" {
 		if _, err := time.Parse("2006-01-02", input.Exchange); err != nil {
@@ -72,9 +76,9 @@ func (s *Postgres) Create(ctx context.Context, userID, groupID int64, input Inpu
 		if role != "OWNER" && role != "ADMIN" {
 			return ErrForbidden
 		}
-		var budget any
-		if input.Budget != nil {
-			budget = *input.Budget
+		var descriptionValue any
+		if description != "" {
+			descriptionValue = description
 		}
 		var deadline any
 		if input.Deadline != nil {
@@ -85,10 +89,10 @@ func (s *Postgres) Create(ctx context.Context, userID, groupID int64, input Inpu
 			exchange = input.Exchange
 		}
 		err = tx.QueryRow(ctx, `
-			INSERT INTO games (group_id, name, status, budget_rub, registration_deadline, exchange_on, created_by)
+			INSERT INTO games (group_id, name, status, description, registration_deadline, exchange_on, created_by)
 			VALUES ($1, $2, 'REGISTRATION', $3, $4, $5, $6)
 			RETURNING id
-		`, groupID, name, budget, deadline, exchange, userID).Scan(&gameID)
+		`, groupID, name, descriptionValue, deadline, exchange, userID).Scan(&gameID)
 		if isUnique(err) {
 			return ErrCurrentGameExists
 		}
@@ -240,17 +244,19 @@ func (s *Postgres) member(ctx context.Context, userID, groupID int64) error {
 
 func scanView(row pgx.Row) (View, error) {
 	var view View
-	var budget *int
+	var description *string
 	var deadline *time.Time
 	var exchange *string
 	err := row.Scan(
-		&view.ID, &view.GroupID, &view.Name, &view.Status, &budget, &deadline, &exchange,
+		&view.ID, &view.GroupID, &view.Name, &view.Status, &description, &deadline, &exchange,
 		&view.Confirmed, &view.Participants, &view.Mine,
 	)
 	if err != nil {
 		return View{}, err
 	}
-	view.Budget = budget
+	if description != nil {
+		view.Description = *description
+	}
 	view.Deadline = deadline
 	if exchange != nil {
 		view.Exchange = *exchange

@@ -2,13 +2,12 @@ package games
 
 import (
 	"errors"
-	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 )
 
-const maxBudgetRub = 100_000_000
+const maxDescriptionRunes = 1000
 
 // Moscow is the calendar for registration and exchange dates. Russia has no daylight saving.
 var Moscow = time.FixedZone("MSK", 3*60*60)
@@ -16,8 +15,8 @@ var Moscow = time.FixedZone("MSK", 3*60*60)
 var (
 	// ErrInvalidName means the game name is empty or longer than 80 characters.
 	ErrInvalidName = errors.New("invalid game name")
-	// ErrInvalidBudget means the budget is not a positive whole number of rubles.
-	ErrInvalidBudget = errors.New("invalid budget")
+	// ErrInvalidDescription means the gift note is empty or longer than 1000 characters.
+	ErrInvalidDescription = errors.New("invalid description")
 	// ErrInvalidDate means the date is not DD.MM.YYYY.
 	ErrInvalidDate = errors.New("invalid date")
 	// ErrForbidden means the person cannot manage this group's game.
@@ -42,31 +41,16 @@ func NormalizeName(name string) (string, error) {
 	return name, nil
 }
 
-// ParseBudget reads a ruble amount. A dash means no budget.
-func ParseBudget(text string) (*int, error) {
+// NormalizeDescription trims a gift note. A dash means there is no note.
+func NormalizeDescription(text string) (string, error) {
 	text = strings.TrimSpace(text)
 	if text == "-" || text == "—" || text == "–" {
-		return nil, nil
+		return "", nil
 	}
-	text = strings.Map(func(r rune) rune {
-		if r == ' ' || r == '\u00a0' || r == '\u202f' {
-			return -1
-		}
-		return r
-	}, text)
-	if text == "" {
-		return nil, ErrInvalidBudget
+	if text == "" || utf8.RuneCountInString(text) > maxDescriptionRunes {
+		return "", ErrInvalidDescription
 	}
-	for _, r := range text {
-		if r < '0' || r > '9' {
-			return nil, ErrInvalidBudget
-		}
-	}
-	n, err := strconv.Atoi(text)
-	if err != nil || n < 1 || n > maxBudgetRub {
-		return nil, ErrInvalidBudget
-	}
-	return &n, nil
+	return text, nil
 }
 
 // ParseDay reads DD.MM.YYYY. A dash skips the date.

@@ -2,20 +2,17 @@ package games
 
 import "testing"
 
-func TestParseBudget(t *testing.T) {
-	got, err := ParseBudget("  2\u00a0000 ")
-	if err != nil || got == nil || *got != 2000 {
-		t.Fatalf("budget %v err %v", got, err)
+func TestNormalizeDescription(t *testing.T) {
+	got, err := NormalizeDescription("  до 2000 ₽, красный ")
+	if err != nil || got != "до 2000 ₽, красный" {
+		t.Fatalf("description %q err %v", got, err)
 	}
-	got, err = ParseBudget("-")
-	if err != nil || got != nil {
-		t.Fatalf("skip %v err %v", got, err)
+	got, err = NormalizeDescription("-")
+	if err != nil || got != "" {
+		t.Fatalf("skip %q err %v", got, err)
 	}
-	if _, err := ParseBudget("0"); err != ErrInvalidBudget {
-		t.Fatalf("zero %v", err)
-	}
-	if _, err := ParseBudget("20.5"); err != ErrInvalidBudget {
-		t.Fatalf("decimal %v", err)
+	if _, err := NormalizeDescription("  "); err != ErrInvalidDescription {
+		t.Fatalf("blank %v", err)
 	}
 }
 
