@@ -114,8 +114,33 @@ func TestCreateGameKeepsMembersPending(t *testing.T) {
 		t.Fatalf("confirm %+v err %v", confirmed, err)
 	}
 	declined, err := catalog.Decide(ctx, guest, view.ID, games.Declined)
-	if err != nil || declined.Mine != games.Declined || declined.Confirmed != 2 || declined.Participants != 3 {
+	if err != nil || declined.Mine != games.Declined || declined.Confirmed != 2 || declined.Participants != 3 || declined.Role != "MEMBER" {
 		t.Fatalf("decline %+v err %v", declined, err)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE game_participants
+		SET assignment_state = 'AWAITING_ASSIGNMENT'
+		WHERE game_id = $1 AND user_id = $2
+	`, view.ID, third); err != nil {
+		t.Fatal(err)
+	}
+	roster, err := catalog.People(ctx, owner, view.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, person := range roster {
+		bucket := person.Status
+		if person.AssignmentState == "AWAITING_ASSIGNMENT" {
+			bucket = "AWAITING_ASSIGNMENT"
+		}
+		got[person.DisplayName] = bucket
+	}
+	if got["Анна"] != games.Confirmed || got["Борис"] != games.Declined || got["Виктор"] != "AWAITING_ASSIGNMENT" || len(got) != 3 {
+		t.Fatalf("roster %+v", got)
+	}
+	if _, err := catalog.People(ctx, guest, view.ID); err != games.ErrForbidden {
+		t.Fatalf("member list %v", err)
 	}
 
 	if _, err := pool.Exec(ctx, `UPDATE games SET registration_deadline = now() - interval '1 minute' WHERE id = $1`, view.ID); err != nil {
@@ -140,8 +165,12 @@ func TestCreateGameKeepsMembersPending(t *testing.T) {
 		t.Fatal(err)
 	}
 	adminGame, err := catalog.Create(ctx, admin, colleagues.ID, games.Input{Name: "Офис"})
-	if err != nil || adminGame.Mine != games.Pending || adminGame.Participants != 2 {
+	if err != nil || adminGame.Mine != games.Pending || adminGame.Participants != 2 || adminGame.Role != "ADMIN" {
 		t.Fatalf("admin game %+v err %v", adminGame, err)
+	}
+	adminRoster, err := catalog.People(ctx, admin, adminGame.ID)
+	if err != nil || len(adminRoster) != 2 {
+		t.Fatalf("admin roster %+v err %v", adminRoster, err)
 	}
 }
 

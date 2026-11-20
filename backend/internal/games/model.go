@@ -34,6 +34,14 @@ type View struct {
 	Confirmed    int
 	Participants int
 	Mine         string
+	Role         string
+}
+
+// Participant is one person in a game, for the organizer's lists.
+type Participant struct {
+	DisplayName     string
+	Status          string
+	AssignmentState string
 }
 
 // Catalog is how the bot creates a game and records a member's answer.
@@ -42,4 +50,5 @@ type Catalog interface {
 	Current(ctx context.Context, userID, groupID int64) (View, bool, error)
 	Open(ctx context.Context, userID, gameID int64) (View, error)
 	Decide(ctx context.Context, userID, gameID int64, status string) (View, error)
+	People(ctx context.Context, userID, gameID int64) ([]Participant, error)
 }

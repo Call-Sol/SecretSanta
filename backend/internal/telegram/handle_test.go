@@ -83,10 +83,12 @@ func (m *memStore) ClearSession(_ context.Context, userID int64) error {
 }
 
 type memGames struct {
-	current games.View
-	has     bool
-	created games.Input
-	calls   int
+	current   games.View
+	has       bool
+	created   games.Input
+	calls     int
+	people    []games.Participant
+	peopleErr error
 }
 
 func (m *memGames) Create(_ context.Context, _ int64, groupID int64, input games.Input) (games.View, error) {
@@ -112,6 +114,13 @@ func (m *memGames) Open(context.Context, int64, int64) (games.View, error) {
 
 func (m *memGames) Decide(context.Context, int64, int64, string) (games.View, error) {
 	return m.current, nil
+}
+
+func (m *memGames) People(context.Context, int64, int64) ([]games.Participant, error) {
+	if m.peopleErr != nil {
+		return nil, m.peopleErr
+	}
+	return m.people, nil
 }
 
 type memGroups struct {
@@ -522,5 +531,74 @@ func TestMemberCannotCreateGame(t *testing.T) {
 	}
 	if edited != forbiddenText || store.sessions[7] != "" {
 		t.Fatalf("edited %q session %q", edited, store.sessions[7])
+	}
+}
+
+func TestOwnerSeesParticipantsByStatus(t *testing.T) {
+	send := &memSend{}
+	catalog := &memGames{
+		has: true,
+		current: games.View{
+			ID: 5, GroupID: 3, Name: "Тайный Санта 2026", Role: "OWNER", Status: "REGISTRATION",
+		},
+		people: []games.Participant{
+			{DisplayName: "Анна", Status: games.Confirmed, AssignmentState: "NOT_APPLICABLE"},
+			{DisplayName: "Борис", Status: games.Declined, AssignmentState: "NOT_APPLICABLE"},
+			{DisplayName: "Виктор", Status: games.Confirmed, AssignmentState: "AWAITING_ASSIGNMENT"},
+			{DisplayName: "Глеб", Status: games.Pending, AssignmentState: "NOT_APPLICABLE"},
+		},
+	}
+	h := newHWithGames(&memStore{}, &memGroups{}, catalog, send)
+	from := User{ID: 7, FirstName: "A"}
+	msg := &Message{MessageID: 3, Chat: Chat{ID: 7, Type: "private"}, From: &from}
+	err := h.Handle(context.Background(), Update{
+		UpdateID:      40,
+		CallbackQuery: &CallbackQuery{ID: "cb", From: from, Message: msg, Data: "game:people:5"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var edited string
+	for _, m := range send.msgs {
+		if m.edit {
+			edited = m.text
+		}
+	}
+	for _, part := range []string{
+		"Подтвердили:\n• Анна",
+		"Ожидают решения:\n• Глеб",
+		"Отказались:\n• Борис",
+		"Ожидают включения:\n• Виктор",
+	} {
+		if !strings.Contains(edited, part) {
+			t.Fatalf("list %q missing %s", edited, part)
+		}
+	}
+	if strings.Contains(edited, "Подтвердили:\n• Виктор") {
+		t.Fatalf("waiting person listed as confirmed: %q", edited)
+	}
+}
+
+func TestMemberCannotListParticipants(t *testing.T) {
+	send := &memSend{}
+	catalog := &memGames{has: true, current: games.View{ID: 5, Role: "MEMBER"}, peopleErr: games.ErrForbidden}
+	h := newHWithGames(&memStore{}, &memGroups{}, catalog, send)
+	from := User{ID: 7, FirstName: "A"}
+	msg := &Message{MessageID: 3, Chat: Chat{ID: 7, Type: "private"}, From: &from}
+	err := h.Handle(context.Background(), Update{
+		UpdateID:      41,
+		CallbackQuery: &CallbackQuery{ID: "cb", From: from, Message: msg, Data: "game:people:5"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var edited string
+	for _, m := range send.msgs {
+		if m.edit {
+			edited = m.text
+		}
+	}
+	if edited != forbiddenText {
+		t.Fatalf("edited %q", edited)
 	}
 }

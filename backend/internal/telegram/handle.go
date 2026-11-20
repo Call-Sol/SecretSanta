@@ -222,6 +222,8 @@ func (h *Handler) callbackScreen(ctx context.Context, data string, userID int64)
 		return h.decideGame(ctx, userID, args[0], games.Confirmed)
 	case "game:decline":
 		return h.decideGame(ctx, userID, args[0], games.Declined)
+	case "game:people":
+		return h.peopleScreen(ctx, userID, args[0])
 	default:
 		return unavailableText, mainKeyboard(), unavailableText
 	}

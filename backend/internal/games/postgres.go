@@ -28,7 +28,8 @@ const viewSelect = `
 	       (SELECT count(*) FROM game_participants cp
 	         WHERE cp.game_id = g.id AND cp.status = 'CONFIRMED'),
 	       (SELECT count(*) FROM game_participants ap WHERE ap.game_id = g.id),
-	       COALESCE(p.status, '')
+	       COALESCE(p.status, ''),
+	       m.role
 	FROM games g
 	JOIN group_members m ON m.group_id = g.group_id AND m.user_id = $1 AND m.status = 'ACTIVE'
 	LEFT JOIN game_participants p ON p.game_id = g.id AND p.user_id = $1
@@ -195,6 +196,40 @@ func (s *Postgres) Decide(ctx context.Context, userID, gameID int64, status stri
 	return s.Open(ctx, userID, gameID)
 }
 
+// People lists participants for the owner or an admin, grouped later by status.
+func (s *Postgres) People(ctx context.Context, userID, gameID int64) ([]Participant, error) {
+	view, err := s.Open(ctx, userID, gameID)
+	if err != nil {
+		return nil, err
+	}
+	if view.Role != "OWNER" && view.Role != "ADMIN" {
+		return nil, ErrForbidden
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT u.display_name, p.status, p.assignment_state
+		FROM game_participants p
+		JOIN users u ON u.id = p.user_id
+		WHERE p.game_id = $1
+		ORDER BY u.display_name, u.id
+	`, gameID)
+	if err != nil {
+		return nil, fmt.Errorf("list participants: %w", err)
+	}
+	defer rows.Close()
+	var out []Participant
+	for rows.Next() {
+		var person Participant
+		if err := rows.Scan(&person.DisplayName, &person.Status, &person.AssignmentState); err != nil {
+			return nil, fmt.Errorf("list participants: %w", err)
+		}
+		out = append(out, person)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list participants: %w", err)
+	}
+	return out, nil
+}
+
 // EnrollNewMember confirms a person who just joined during open registration.
 // An existing participant row is left unchanged.
 func EnrollNewMember(ctx context.Context, tx pgx.Tx, groupID, userID int64) (int64, string, error) {
@@ -249,7 +284,7 @@ func scanView(row pgx.Row) (View, error) {
 	var exchange *string
 	err := row.Scan(
 		&view.ID, &view.GroupID, &view.Name, &view.Status, &description, &deadline, &exchange,
-		&view.Confirmed, &view.Participants, &view.Mine,
+		&view.Confirmed, &view.Participants, &view.Mine, &view.Role,
 	)
 	if err != nil {
 		return View{}, err

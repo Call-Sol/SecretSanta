@@ -14,7 +14,7 @@ func parseCallback(data string) (string, []int64, bool) {
 	switch verb {
 	case "menu:home", "menu:help", "grp:new", "grp:list":
 		return verb, nil, len(parts) == 2
-	case "grp:open", "grp:members", "inv:accept", "game:open", "game:create", "game:confirm", "game:decline":
+	case "grp:open", "grp:members", "inv:accept", "game:open", "game:create", "game:confirm", "game:decline", "game:people":
 		if len(parts) != 3 {
 			return "", nil, false
 		}

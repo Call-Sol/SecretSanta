@@ -66,6 +66,33 @@ func (h *Handler) gameScreen(ctx context.Context, userID, gameID int64) (string,
 	return text, keyboard, ""
 }
 
+func (h *Handler) peopleScreen(ctx context.Context, userID, gameID int64) (string, Keyboard, string) {
+	view, err := h.games.Open(ctx, userID, gameID)
+	if errors.Is(err, games.ErrNotMember) {
+		return notMemberText, mainKeyboard(), ""
+	}
+	if errors.Is(err, games.ErrNotInGame) {
+		return notInGameText, mainKeyboard(), ""
+	}
+	if err != nil {
+		h.log.Error("open game", "game_id", gameID, "err", err.Error())
+		return unavailableText, mainKeyboard(), ""
+	}
+	people, err := h.games.People(ctx, userID, gameID)
+	if errors.Is(err, games.ErrForbidden) {
+		return forbiddenText, mainKeyboard(), ""
+	}
+	if errors.Is(err, games.ErrNotMember) {
+		return notMemberText, mainKeyboard(), ""
+	}
+	if err != nil {
+		h.log.Error("list participants", "game_id", gameID, "err", err.Error())
+		return unavailableText, mainKeyboard(), ""
+	}
+	text, keyboard := gamePeopleScreen(view, people)
+	return text, keyboard, ""
+}
+
 func (h *Handler) decideGame(ctx context.Context, userID, gameID int64, status string) (string, Keyboard, string) {
 	view, err := h.games.Decide(ctx, userID, gameID, status)
 	if errors.Is(err, games.ErrNotMember) {
