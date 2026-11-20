@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -54,6 +55,36 @@ func TestGetMeRedactsTokenOnDialError(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "super-secret-token") {
 		t.Fatalf("token leaked: %v", err)
+	}
+}
+
+func TestSendMessagePostsMenuKeyboard(t *testing.T) {
+	var body []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/botsuper-secret-token/sendMessage" {
+			t.Errorf("path %s", r.URL.Path)
+		}
+		var err error
+		body, err = io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":1}}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	err := NewClient("super-secret-token", WithBaseURL(srv.URL)).SendMessage(context.Background(), 42, menuText, mainKeyboard())
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, part := range []string{`"chat_id":42`, "Мои группы", "grp:list", "Создать группу", "grp:new", "Помощь", "menu:help"} {
+		if !strings.Contains(text, part) {
+			t.Fatalf("body missing %s: %s", part, text)
+		}
+	}
+	if strings.Contains(text, "super-secret-token") {
+		t.Fatalf("token leaked: %s", text)
 	}
 }
 

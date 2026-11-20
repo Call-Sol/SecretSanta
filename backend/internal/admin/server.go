@@ -117,7 +117,7 @@ func (s *Server) loginGET(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/groups", http.StatusSeeOther)
 		return
 	}
-	s.renderLogin(w, "")
+	s.renderLogin(w, r, "")
 }
 
 func (s *Server) loginPOST(w http.ResponseWriter, r *http.Request) {
@@ -133,7 +133,7 @@ func (s *Server) loginPOST(w http.ResponseWriter, r *http.Request) {
 	passOK := sameSecret(r.FormValue("password"), s.password)
 	if !userOK || !passOK {
 		s.log.Info("admin login failed")
-		s.renderLogin(w, "Invalid username or password.")
+		s.renderLogin(w, r, "Invalid username or password.")
 		return
 	}
 	raw, _, err := s.store.CreateSession(r.Context(), s.sessionTTL)
@@ -142,8 +142,8 @@ func (s *Server) loginPOST(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Something went wrong.", http.StatusInternalServerError)
 		return
 	}
-	s.setCookie(w, csrfCookie, "", -time.Second)
-	s.setCookie(w, sessionCookie, raw, s.sessionTTL)
+	s.setCookie(w, r, csrfCookie, "", -time.Second)
+	s.setCookie(w, r, sessionCookie, raw, s.sessionTTL)
 	s.log.Info("admin login succeeded")
 	http.Redirect(w, r, "/groups", http.StatusSeeOther)
 }
@@ -163,7 +163,7 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.DeleteSession(r.Context(), raw); err != nil {
 		s.log.Error("delete admin session", "err", err)
 	}
-	s.setCookie(w, sessionCookie, "", -time.Second)
+	s.setCookie(w, r, sessionCookie, "", -time.Second)
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
@@ -362,14 +362,14 @@ func (s *Server) renderGroup(w http.ResponseWriter, r *http.Request, id int64, f
 	})
 }
 
-func (s *Server) renderLogin(w http.ResponseWriter, message string) {
+func (s *Server) renderLogin(w http.ResponseWriter, r *http.Request, message string) {
 	csrf, err := randomToken(32)
 	if err != nil {
 		s.log.Error("login csrf", "err", err)
 		http.Error(w, "Something went wrong.", http.StatusInternalServerError)
 		return
 	}
-	s.setCookie(w, csrfCookie, csrf, s.sessionTTL)
+	s.setCookie(w, r, csrfCookie, csrf, s.sessionTTL)
 	s.render(w, "login", pageData{Title: "Sign in", CSRF: csrf, Error: message})
 }
 
@@ -410,14 +410,14 @@ func (s *Server) render(w http.ResponseWriter, name string, data any) {
 	}
 }
 
-func (s *Server) setCookie(w http.ResponseWriter, name, value string, ttl time.Duration) {
+func (s *Server) setCookie(w http.ResponseWriter, r *http.Request, name, value string, ttl time.Duration) {
 	cookie := &http.Cookie{
 		Name:     name,
 		Value:    value,
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
-		Secure:   s.secureCookie,
+		Secure:   s.secureCookie && requestIsHTTPS(r),
 	}
 	if ttl < 0 {
 		cookie.MaxAge = -1
@@ -427,6 +427,16 @@ func (s *Server) setCookie(w http.ResponseWriter, name, value string, ttl time.D
 		cookie.Expires = time.Now().Add(ttl)
 	}
 	http.SetCookie(w, cookie)
+}
+
+func requestIsHTTPS(r *http.Request) bool {
+	if r != nil && r.TLS != nil {
+		return true
+	}
+	if r == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")), "https")
 }
 
 func (s *Server) withHeaders(next http.Handler) http.Handler {

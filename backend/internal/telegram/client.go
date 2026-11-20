@@ -2,6 +2,7 @@
 package telegram
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -112,10 +113,131 @@ func (c *Client) GetMe(ctx context.Context) (Bot, error) {
 	return bot, nil
 }
 
-func fail(secret string, err error) error {
-	msg := err.Error()
-	if secret != "" {
-		msg = strings.ReplaceAll(msg, secret, "***")
+// GetUpdates long-polls the Bot API. timeoutSec is the Telegram timeout, not the HTTP deadline.
+func (c *Client) GetUpdates(ctx context.Context, offset int64, timeoutSec int) ([]Update, error) {
+	if timeoutSec <= 0 {
+		timeoutSec = 30
 	}
-	return fmt.Errorf("telegram getMe: %s", msg)
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec+10)*time.Second)
+	defer cancel()
+
+	payload := map[string]any{
+		"timeout":         timeoutSec,
+		"allowed_updates": []string{"message", "callback_query"},
+	}
+	if offset > 0 {
+		payload["offset"] = offset
+	}
+	var result []Update
+	if err := c.call(ctx, "getUpdates", payload, &result, true); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// SendMessage sends text with an inline keyboard.
+func (c *Client) SendMessage(ctx context.Context, chatID int64, text string, keyboard Keyboard) error {
+	return c.call(ctx, "sendMessage", map[string]any{
+		"chat_id":      chatID,
+		"text":         text,
+		"reply_markup": keyboardBody(keyboard),
+	}, nil, false)
+}
+
+// EditMessageText replaces a menu message in place.
+func (c *Client) EditMessageText(ctx context.Context, chatID int64, messageID int, text string, keyboard Keyboard) error {
+	return c.call(ctx, "editMessageText", map[string]any{
+		"chat_id":      chatID,
+		"message_id":   messageID,
+		"text":         text,
+		"reply_markup": keyboardBody(keyboard),
+	}, nil, false)
+}
+
+// AnswerCallbackQuery stops the button spinner. text is an optional toast.
+func (c *Client) AnswerCallbackQuery(ctx context.Context, callbackID, text string) error {
+	payload := map[string]any{"callback_query_id": callbackID}
+	if text != "" {
+		payload["text"] = text
+	}
+	return c.call(ctx, "answerCallbackQuery", payload, nil, false)
+}
+
+func keyboardBody(keyboard Keyboard) map[string]any {
+	rows := make([][]map[string]string, 0, len(keyboard.Rows))
+	for _, row := range keyboard.Rows {
+		out := make([]map[string]string, 0, len(row))
+		for _, button := range row {
+			out = append(out, map[string]string{
+				"text":          button.Text,
+				"callback_data": button.Data,
+			})
+		}
+		rows = append(rows, out)
+	}
+	return map[string]any{"inline_keyboard": rows}
+}
+
+func (c *Client) call(ctx context.Context, method string, payload any, dest any, longPoll bool) error {
+	if strings.TrimSpace(c.token) == "" {
+		return fmt.Errorf("telegram %s: token is empty", method)
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("telegram %s: %s", method, redactToken(c.token, err.Error()))
+	}
+	endpoint := c.baseURL + "/bot" + c.token + "/" + method
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("telegram %s: %s", method, redactToken(c.token, err.Error()))
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	httpClient := c.http
+	if longPoll {
+		copied := *c.http
+		copied.Timeout = 0
+		httpClient = &copied
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("telegram %s: %s", method, redactToken(c.token, err.Error()))
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return fmt.Errorf("telegram %s: %s", method, redactToken(c.token, err.Error()))
+	}
+	var envelope struct {
+		OK          bool            `json:"ok"`
+		Description string          `json:"description"`
+		Result      json.RawMessage `json:"result"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return fmt.Errorf("telegram %s: status %d", method, resp.StatusCode)
+	}
+	if !envelope.OK {
+		if envelope.Description == "" {
+			return fmt.Errorf("telegram %s: status %d", method, resp.StatusCode)
+		}
+		return fmt.Errorf("telegram %s: %s", method, envelope.Description)
+	}
+	if dest != nil && len(envelope.Result) > 0 {
+		if err := json.Unmarshal(envelope.Result, dest); err != nil {
+			return fmt.Errorf("telegram %s: decode result", method)
+		}
+	}
+	return nil
+}
+
+func fail(secret string, err error) error {
+	return fmt.Errorf("telegram getMe: %s", redactToken(secret, err.Error()))
+}
+
+func redactToken(secret, msg string) string {
+	if secret == "" {
+		return msg
+	}
+	return strings.ReplaceAll(msg, secret, "***")
 }

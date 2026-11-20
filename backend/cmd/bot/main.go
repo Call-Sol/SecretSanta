@@ -41,7 +41,9 @@ func run(ctx context.Context) error {
 		return err
 	}
 	log.Info("telegram getMe", "bot_id", me.ID, "username", me.Username)
-	log.Info("update loop is not started in this slice", "mode", cfg.TelegramMode)
-	<-ctx.Done()
-	return nil
+	if cfg.TelegramMode != config.ModePolling {
+		return fmt.Errorf("telegram mode %s is not implemented", cfg.TelegramMode)
+	}
+	log.Info("telegram polling")
+	return telegram.Poll(ctx, telegram.NewClient(cfg.TelegramBotToken), telegram.NewPostgres(pool), log)
 }

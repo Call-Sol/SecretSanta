@@ -138,7 +138,7 @@ Fill in:
 | `TELEGRAM_BOT_USERNAME` | Bot username without `@` |
 | `ADMIN_USERNAME` | Operator login |
 | `ADMIN_PASSWORD` | 8–200 characters |
-| `ADMIN_COOKIE_SECURE` | `true` |
+| `ADMIN_COOKIE_SECURE` | `true` once the hostname is served over HTTPS. On plain HTTP the panel ignores it, because a Secure cookie would be dropped and login would fail. |
 
 `DATABASE_URL` in that file is not used by the containers. Compose points them at `postgres:5432`. The localhost URL is only for `make run-admin` on a development machine.
 

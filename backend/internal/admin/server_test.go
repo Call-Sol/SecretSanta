@@ -189,6 +189,44 @@ func clientDo(t *testing.T, client *http.Client, method, target, body string) re
 	return response{StatusCode: res.StatusCode, Header: res.Header, Body: string(buf)}
 }
 
+func TestLoginCookieSecureFollowsRequest(t *testing.T) {
+	panel, err := New(newMemStore(), Options{
+		Username:     "operator",
+		Password:     "test-password",
+		BotUsername:  "secret_santa_bot",
+		SecureCookie: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := panel.Handler()
+
+	plain := httptest.NewRecorder()
+	handler.ServeHTTP(plain, httptest.NewRequest(http.MethodGet, "/login", nil))
+	if cookie := csrfCookieOf(t, plain); cookie.Secure {
+		t.Fatal("secure cookie was set on plain HTTP")
+	}
+
+	httpsReq := httptest.NewRequest(http.MethodGet, "/login", nil)
+	httpsReq.Header.Set("X-Forwarded-Proto", "https")
+	secure := httptest.NewRecorder()
+	handler.ServeHTTP(secure, httpsReq)
+	if cookie := csrfCookieOf(t, secure); !cookie.Secure {
+		t.Fatal("cookie behind HTTPS was not marked Secure")
+	}
+}
+
+func csrfCookieOf(t *testing.T, rec *httptest.ResponseRecorder) *http.Cookie {
+	t.Helper()
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == csrfCookie {
+			return cookie
+		}
+	}
+	t.Fatal("csrf cookie missing")
+	return nil
+}
+
 func form(values map[string]string) string {
 	data := url.Values{}
 	for key, value := range values {
