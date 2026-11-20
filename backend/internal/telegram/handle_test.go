@@ -280,7 +280,7 @@ func TestStartStoresUserAndShowsMenu(t *testing.T) {
 	if got.chat != 42 || got.text != menuText {
 		t.Fatalf("message %+v", got)
 	}
-	want := []string{"Мои группы|grp:list", "Мои игры|game:list", "Создать группу|grp:new", "Помощь|menu:help"}
+	want := []string{"Мои игры|game:list", "Помощь|menu:help"}
 	if strings.Join(got.data, ",") != strings.Join(want, ",") {
 		t.Fatalf("buttons %v", got.data)
 	}
@@ -648,7 +648,7 @@ func TestGameInviteConfirmsOnStart(t *testing.T) {
 		t.Fatal("group invite was consumed")
 	}
 	got := send.msgs[0]
-	if !strings.Contains(got.text, "Ты присоединился к группе «Друзья» и участвуешь в игре «Тайный Санта 2026».") {
+	if !strings.Contains(got.text, "Ты участвуешь в игре «Тайный Санта 2026».") || strings.Contains(got.text, "группе") {
 		t.Fatalf("text %q", got.text)
 	}
 	if strings.Contains(strings.Join(got.data, ","), "Подтвердить") || strings.Contains(got.text, "play_abc") {
@@ -677,11 +677,46 @@ func TestMyGamesOpensAGame(t *testing.T) {
 			data = m.data
 		}
 	}
-	if !strings.Contains(edited, "Твои игры:") || !strings.Contains(edited, "Тайный Санта 2026 — Друзья") || !strings.Contains(edited, "Регистрация") {
+	if !strings.Contains(edited, "Твои игры:") || !strings.Contains(edited, "Тайный Санта 2026") || strings.Contains(edited, "Друзья") || !strings.Contains(edited, "Регистрация") {
 		t.Fatalf("edited %q", edited)
 	}
-	if strings.Join(data, ",") != "Тайный Санта 2026|game:open:5,В меню|menu:home" {
+	if strings.Join(data, ",") != "Тайный Санта 2026|game:open:5,Создать игру|game:new,В меню|menu:home" {
 		t.Fatalf("buttons %v", data)
+	}
+}
+
+func TestMyGamesCreatesAGame(t *testing.T) {
+	store := &memStore{}
+	send := &memSend{}
+	catalog := &memGames{}
+	directory := &memGroups{}
+	h := newHWithGames(store, directory, catalog, send)
+	from := User{ID: 7, FirstName: "A"}
+	msg := &Message{MessageID: 3, Chat: Chat{ID: 7, Type: "private"}, From: &from}
+	private := func(updateID int64, text string) Update {
+		return Update{UpdateID: updateID, Message: &Message{From: &from, Chat: Chat{ID: 7, Type: "private"}, Text: text}}
+	}
+	steps := []Update{
+		{UpdateID: 70, CallbackQuery: &CallbackQuery{ID: "cb", From: from, Message: msg, Data: "game:new"}},
+		private(71, "Тайный Санта 2026"),
+		private(72, "-"),
+		private(73, "-"),
+		private(74, "-"),
+	}
+	for _, upd := range steps {
+		if err := h.Handle(context.Background(), upd); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(directory.created) != 1 || directory.created[0] != "Тайный Санта 2026" {
+		t.Fatalf("groups %+v", directory.created)
+	}
+	if catalog.calls != 1 || catalog.created.Name != "Тайный Санта 2026" {
+		t.Fatalf("created %+v calls %d", catalog.created, catalog.calls)
+	}
+	last := send.msgs[len(send.msgs)-1].text
+	if !strings.Contains(last, "Игра создана.") || strings.Contains(last, "группе") {
+		t.Fatalf("card %q", last)
 	}
 }
 

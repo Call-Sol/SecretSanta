@@ -11,17 +11,21 @@ import (
 func gameListScreen(items []games.Summary) (string, Keyboard) {
 	if len(items) == 0 {
 		return noGamesText, Keyboard{Rows: [][]Button{
+			{{Text: "Создать игру", Data: "game:new"}},
 			{{Text: "В меню", Data: "menu:home"}},
 		}}
 	}
-	rows := make([][]Button, 0, len(items)+1)
+	rows := make([][]Button, 0, len(items)+2)
 	var b strings.Builder
 	b.WriteString("Твои игры:")
 	for _, item := range items {
-		fmt.Fprintf(&b, "\n• %s — %s\n  %s", item.Name, item.GroupName, gameStatusLabel(item.Status))
+		fmt.Fprintf(&b, "\n• %s\n  %s", item.Name, gameStatusLabel(item.Status))
 		rows = append(rows, []Button{{Text: buttonLabel(item.Name), Data: fmt.Sprintf("game:open:%d", item.ID)}})
 	}
-	rows = append(rows, []Button{{Text: "В меню", Data: "menu:home"}})
+	rows = append(rows,
+		[]Button{{Text: "Создать игру", Data: "game:new"}},
+		[]Button{{Text: "В меню", Data: "menu:home"}},
+	)
 	return b.String(), Keyboard{Rows: rows}
 }
 

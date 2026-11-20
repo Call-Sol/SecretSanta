@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/alekseymakarkin/secret-santa/internal/games"
@@ -40,6 +39,18 @@ func (h *Handler) startGame(ctx context.Context, userID, groupID int64) (string,
 		return text, keyboard, ""
 	}
 	raw, err := json.Marshal(gameDraft{GroupID: groupID})
+	if err != nil {
+		return gameFailedText, mainKeyboard(), ""
+	}
+	if err := h.store.SaveSession(ctx, userID, "game_name", raw); err != nil {
+		h.log.Error("save session", "err", err.Error())
+		return gameFailedText, mainKeyboard(), ""
+	}
+	return askGameNameText, Keyboard{}, ""
+}
+
+func (h *Handler) startOwnGame(ctx context.Context, userID int64) (string, Keyboard, string) {
+	raw, err := json.Marshal(gameDraft{})
 	if err != nil {
 		return gameFailedText, mainKeyboard(), ""
 	}
@@ -114,7 +125,7 @@ func (h *Handler) decideGame(ctx context.Context, userID, gameID int64, status s
 
 func (h *Handler) gameWizard(ctx context.Context, chatID, userID int64, state string, raw []byte, text string) error {
 	var draft gameDraft
-	if err := json.Unmarshal(raw, &draft); err != nil || draft.GroupID == 0 {
+	if err := json.Unmarshal(raw, &draft); err != nil {
 		if err := h.store.ClearSession(ctx, userID); err != nil {
 			return err
 		}
@@ -172,13 +183,24 @@ func (h *Handler) finishGame(ctx context.Context, chatID, userID int64, draft ga
 	if !skip {
 		input.Exchange = day.In(games.Moscow).Format("2006-01-02")
 	}
+	if draft.GroupID == 0 {
+		created, err := h.groups.Create(ctx, userID, draft.Name)
+		if err != nil {
+			h.log.Error("create game", "err", err.Error())
+			if clearErr := h.store.ClearSession(ctx, userID); clearErr != nil {
+				return clearErr
+			}
+			return h.send.SendMessage(ctx, chatID, gameFailedText, mainKeyboard())
+		}
+		draft.GroupID = created.ID
+	}
 	view, err := h.games.Create(ctx, userID, draft.GroupID, input)
 	if clearErr := h.store.ClearSession(ctx, userID); clearErr != nil {
 		return clearErr
 	}
 	if errors.Is(err, games.ErrCurrentGameExists) {
 		return h.send.SendMessage(ctx, chatID, currentGameExistsText, Keyboard{Rows: [][]Button{
-			{{Text: "К группе", Data: fmt.Sprintf("grp:open:%d", draft.GroupID)}},
+			{{Text: "Мои игры", Data: "game:list"}},
 		}})
 	}
 	if errors.Is(err, games.ErrForbidden) {

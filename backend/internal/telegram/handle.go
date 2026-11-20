@@ -172,9 +172,7 @@ func (h *Handler) acceptGameInvite(ctx context.Context, userID int64, token stri
 	}
 	h.log.Info("game invite accepted", "game_id", result.ID, "group_id", result.GroupID, "already", result.AlreadyMember)
 	intro := fmt.Sprintf("🎄 Ты участвуешь в игре «%s».", result.Name)
-	if !result.AlreadyMember {
-		intro = fmt.Sprintf("🎄 Ты присоединился к группе «%s» и участвуешь в игре «%s».", result.GroupName, result.Name)
-	} else if result.AlreadyConfirmed {
+	if result.AlreadyConfirmed {
 		intro = fmt.Sprintf("Ты уже участвуешь в игре «%s».", result.Name)
 	}
 	return h.showGame(result.View, intro)
@@ -237,6 +235,8 @@ func (h *Handler) callbackScreen(ctx context.Context, data string, userID int64)
 		return h.listScreen(ctx, userID)
 	case "game:list":
 		return h.gamesScreen(ctx, userID)
+	case "game:new":
+		return h.startOwnGame(ctx, userID)
 	case "grp:open":
 		return h.openScreen(ctx, userID, args[0])
 	case "grp:members":

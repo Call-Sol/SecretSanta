@@ -81,7 +81,7 @@ func TestSendMessagePostsMenuKeyboard(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(body)
-	for _, part := range []string{`"chat_id":42`, "Мои группы", "grp:list", `"copy_text":{"text":"https://t.me/secret_santa_bot?start=join_abc"}`} {
+	for _, part := range []string{`"chat_id":42`, "Мои игры", "game:list", `"copy_text":{"text":"https://t.me/secret_santa_bot?start=join_abc"}`} {
 		if !strings.Contains(text, part) {
 			t.Fatalf("body missing %s: %s", part, text)
 		}

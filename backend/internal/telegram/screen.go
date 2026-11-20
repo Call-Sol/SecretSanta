@@ -14,9 +14,7 @@ type Keyboard struct {
 
 func mainKeyboard() Keyboard {
 	return Keyboard{Rows: [][]Button{
-		{{Text: "Мои группы", Data: "grp:list"}},
 		{{Text: "Мои игры", Data: "game:list"}},
-		{{Text: "Создать группу", Data: "grp:new"}},
 		{{Text: "Помощь", Data: "menu:help"}},
 	}}
 }
@@ -24,10 +22,8 @@ func mainKeyboard() Keyboard {
 const menuText = "🎄 Secret Santa"
 
 const helpText = "🎄 Secret Santa\n\n" +
-	"Бот ведёт Тайного Санту в личном чате. Группы здесь свои, это не чаты Telegram.\n\n" +
-	"Мои группы — список твоих групп.\n" +
-	"Мои игры — игры в твоих группах.\n" +
-	"Создать группу — новая группа.\n" +
+	"Бот ведёт Тайного Санту в личном чате.\n\n" +
+	"Мои игры — список твоих игр. Там же можно создать новую.\n" +
 	"Помощь — это сообщение."
 
 const noGamesText = "У тебя пока нет игр."
